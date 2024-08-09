@@ -7,11 +7,13 @@ import (
 	"net/mail"
 	"strings"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	"github.com/google/uuid"
 	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
 	"github.com/nucleuscloud/neosync/worker/pkg/rng"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
+
+// +neosyncTransformerBuilder:transform:transformEmail
 
 type InvalidEmailAction string
 
@@ -35,17 +37,18 @@ func isValidInvalidEmailAction(action string) bool {
 
 func init() {
 	spec := bloblang.NewPluginSpec().
-		Param(bloblang.NewAnyParam("email").Optional()).
-		Param(bloblang.NewBoolParam("preserve_length").Default(false)).
-		Param(bloblang.NewBoolParam("preserve_domain").Default(false)).
-		Param(bloblang.NewAnyParam("excluded_domains").Default([]any{})).
-		Param(bloblang.NewInt64Param("max_length").Default(10000)).
-		Param(bloblang.NewInt64Param("seed").Optional()).
-		Param(bloblang.NewStringParam("email_type").Default(GenerateEmailType_UuidV4.String())).
-		Param(bloblang.NewStringParam("invalid_email_action").Default(InvalidEmailAction_Reject.String()))
+		Description("Transforms an existing email address.").
+		Param(bloblang.NewAnyParam("value").Optional()).
+		Param(bloblang.NewBoolParam("preserve_length").Default(false).Description("Specifies the maximum length for the transformed data. This field ensures that the output does not exceed a certain number of characters.")).
+		Param(bloblang.NewBoolParam("preserve_domain").Default(false).Description("A boolean indicating whether the domain part of the email should be preserved.")).
+		Param(bloblang.NewAnyParam("excluded_domains").Default([]any{}).Description("A list of domains that should be excluded from the transformation")).
+		Param(bloblang.NewInt64Param("max_length").Default(10000).Description("Whether the original length of the input data should be preserved during transformation. If set to true, the transformation logic will ensure that the output data has the same length as the input data.")).
+		Param(bloblang.NewInt64Param("seed").Optional().Description("An optional seed value used for generating deterministic transformations.")).
+		Param(bloblang.NewStringParam("email_type").Default(GenerateEmailType_UuidV4.String()).Description("Specifies the type of email to transform, with options including `uuidv4`, `fullname`, or `any`.")).
+		Param(bloblang.NewStringParam("invalid_email_action").Default(InvalidEmailAction_Reject.String()).Description("Specifies the action to take when an invalid email is encountered, with options including `reject`, `passthrough`, `null`, or `generate`."))
 
 	err := bloblang.RegisterFunctionV2("transform_email", spec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
-		emailPtr, err := args.GetOptionalString("email")
+		emailPtr, err := args.GetOptionalString("value")
 		if err != nil {
 			return nil, err
 		}
@@ -100,16 +103,10 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		var seed int64
-		if seedArg != nil {
-			seed = *seedArg
-		} else {
-			// we want a bit more randomness here with generate_email so using something that isn't time based
-			var err error
-			seed, err = transformer_utils.GenerateCryptoSeed()
-			if err != nil {
-				return nil, err
-			}
+
+		seed, err := transformer_utils.GetSeedOrDefault(seedArg)
+		if err != nil {
+			return nil, err
 		}
 		randomizer := rng.New(seed)
 		return func() (any, error) {
@@ -130,6 +127,40 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (t *TransformEmail) Transform(value, opts any) (any, error) {
+	parsedOpts, ok := opts.(*TransformEmailOpts)
+	if !ok {
+		return nil, fmt.Errorf("invalid parsed opts: %T", opts)
+	}
+
+	valueStr, ok := value.(string)
+	if !ok {
+		return nil, errors.New("value is not a string")
+	}
+
+	excludedDomains := []string{}
+	if parsedOpts.excludedDomains != nil {
+		exDomains, ok := parsedOpts.excludedDomains.([]any)
+		if !ok {
+			return nil, errors.New("excludedDomains is not a slice")
+		}
+		exDomainsStrs, err := fromAnyToStringSlice(exDomains)
+		if err != nil {
+			return nil, errors.New("excludedDomains is not a []string")
+		}
+		excludedDomains = exDomainsStrs
+	}
+
+	return transformEmail(parsedOpts.randomizer, valueStr, transformeEmailOptions{
+		PreserveLength:     parsedOpts.preserveLength,
+		PreserveDomain:     parsedOpts.preserveDomain,
+		MaxLength:          parsedOpts.maxLength,
+		ExcludedDomains:    excludedDomains,
+		EmailType:          GenerateEmailType(parsedOpts.emailType),
+		InvalidEmailAction: InvalidEmailAction(parsedOpts.invalidEmailAction),
+	})
 }
 
 func fromAnyToStringSlice(input any) ([]string, error) {

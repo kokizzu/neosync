@@ -140,7 +140,7 @@ export function SchemaTableToolbar<TData>({
             <CheckIcon />
           </Button>
           <EditTransformerOptions
-            transformer={transformer ?? new SystemTransformer({})}
+            transformer={transformer ?? new SystemTransformer()}
             value={bulkTransformer}
             onSubmit={setBulkTransformer}
             disabled={!transformer}

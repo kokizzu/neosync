@@ -1,5 +1,5 @@
 'use client';
-import { UserDefinedTransformerForm } from '@/app/(mgmt)/[account]/new/transformer/UserDefinedTransformerForms/UserDefinedTransformerForm';
+import TransformerForm from '@/app/(mgmt)/[account]/new/transformer/TransformerForms/TransformerForm';
 import ButtonText from '@/components/ButtonText';
 import OverviewContainer from '@/components/containers/OverviewContainer';
 import PageHeader from '@/components/headers/PageHeader';
@@ -17,13 +17,17 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useGetSystemTransformerBySource } from '@/libs/hooks/useGetSystemTransformerBySource';
 import {
   getTransformerDataTypesString,
   getTransformerSourceString,
 } from '@/util/util';
-import { convertTransformerConfigToForm } from '@/yup-validations/jobs';
+import {
+  convertTransformerConfigSchemaToTransformerConfig,
+  convertTransformerConfigToForm,
+} from '@/yup-validations/jobs';
+import { useQuery } from '@connectrpc/connect-query';
 import { TransformerSource } from '@neosync/sdk';
+import { getSystemTransformerBySource } from '@neosync/sdk/connectquery';
 import Error from 'next/error';
 import NextLink from 'next/link';
 import { ReactElement } from 'react';
@@ -41,8 +45,11 @@ export default function ViewSystemTransformers({
   params,
 }: PageProps): ReactElement {
   const sourceParam = getTransformerSource(params?.source ?? '');
-  const { data: systemTransformerData, isLoading } =
-    useGetSystemTransformerBySource(sourceParam);
+  const { data: systemTransformerData, isLoading } = useQuery(
+    getSystemTransformerBySource,
+    { source: sourceParam },
+    { enabled: !!sourceParam }
+  );
   const { account } = useAccount();
   const systemTransformer = systemTransformerData?.transformer;
 
@@ -64,6 +71,8 @@ export default function ViewSystemTransformers({
   if (!systemTransformer) {
     return <Error statusCode={404} />;
   }
+
+  const cfg = form.watch('config');
 
   return (
     <OverviewContainer
@@ -152,10 +161,11 @@ export default function ViewSystemTransformers({
             </div>
           </div>
           <div>
-            {UserDefinedTransformerForm({
-              value: systemTransformer?.source ?? TransformerSource.UNSPECIFIED,
-              disabled: true,
-            })}
+            <TransformerForm
+              value={convertTransformerConfigSchemaToTransformerConfig(cfg)}
+              setValue={() => undefined}
+              disabled={true}
+            />
           </div>
           <div className="flex flex-row justify-start">
             <NextLink href={`/${account?.name}/transformers?tab=system`}>

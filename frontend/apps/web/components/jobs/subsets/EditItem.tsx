@@ -1,6 +1,6 @@
+import { ConnectionConfigCase } from '@/app/(mgmt)/[account]/connections/util';
 import ButtonText from '@/components/ButtonText';
 import Spinner from '@/components/Spinner';
-import { useAccount } from '@/components/providers/account-provider';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -9,15 +9,23 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { cn } from '@/libs/utils';
 import { getErrorMessage } from '@/util/util';
+import { useMutation } from '@connectrpc/connect-query';
 import { Editor, useMonaco } from '@monaco-editor/react';
 import { CheckSqlQueryResponse, GetTableRowCountResponse } from '@neosync/sdk';
+import { checkSqlQuery, getTableRowCount } from '@neosync/sdk/connectquery';
 import { editor } from 'monaco-editor';
 import { useTheme } from 'next-themes';
 import { ReactElement, useEffect, useRef, useState } from 'react';
 import ValidateQueryErrorAlert from './SubsetErrorAlert';
 import ValidateQueryBadge from './ValidateQueryBadge';
 import { TableRow } from './subset-table/column';
+import {
+  isSubsetRowCountSupported,
+  isSubsetValidationSupported,
+  ValidSubsetConnectionType,
+} from './utils';
 
 interface Props {
   item?: TableRow;
@@ -25,12 +33,19 @@ interface Props {
   onSave(): void;
   onCancel(): void;
   connectionId: string;
-  dbType: string;
+  connectionType: ValidSubsetConnectionType;
   columns: string[];
 }
 export default function EditItem(props: Props): ReactElement {
-  const { item, onItem, onSave, onCancel, connectionId, dbType, columns } =
-    props;
+  const {
+    item,
+    onItem,
+    onSave,
+    onCancel,
+    connectionId,
+    connectionType,
+    columns,
+  } = props;
   const [validateResp, setValidateResp] = useState<
     CheckSqlQueryResponse | undefined
   >();
@@ -38,12 +53,14 @@ export default function EditItem(props: Props): ReactElement {
     GetTableRowCountResponse | undefined
   >();
   const [calculatingRowCount, setCalculatingRowCount] = useState(false);
-  const { account } = useAccount();
   const { resolvedTheme } = useTheme();
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const [rowCountError, setRowCountError] = useState<string>();
 
   const monaco = useMonaco();
+
+  const showRowCountButton = isSubsetRowCountSupported(connectionType);
+  const showValidateButton = isSubsetValidationSupported(connectionType);
 
   useEffect(() => {
     if (monaco) {
@@ -104,24 +121,28 @@ export default function EditItem(props: Props): ReactElement {
     setValidateResp(undefined);
   }, [item]);
 
-  async function onValidate(): Promise<void> {
-    const pgSting = `select * from "${item?.schema}"."${item?.table}" WHERE ${item?.where};`;
-    const mysqlString = `select * from \`${item?.schema}\`.\`${item?.table}\` WHERE ${item?.where};`;
+  const { mutateAsync: validateSql } = useMutation(checkSqlQuery);
+  const { mutateAsync: getRowCountByTable } = useMutation(getTableRowCount);
 
-    try {
-      const resp = await validateSql(
-        account?.id ?? '',
-        connectionId,
-        dbType == 'mysql' ? mysqlString : pgSting
-      );
-      setValidateResp(resp);
-    } catch (err) {
-      setValidateResp(
-        new CheckSqlQueryResponse({
-          isValid: false,
-          erorrMessage: getErrorMessage(err),
-        })
-      );
+  async function onValidate(): Promise<void> {
+    if (connectionType === 'pgConfig' || connectionType === 'mysqlConfig') {
+      const pgString = `select * from "${item?.schema}"."${item?.table}" WHERE ${item?.where};`;
+      const mysqlString = `select * from \`${item?.schema}\`.\`${item?.table}\` WHERE ${item?.where};`;
+
+      try {
+        const resp = await validateSql({
+          id: connectionId,
+          query: connectionType === 'mysqlConfig' ? mysqlString : pgString,
+        });
+        setValidateResp(resp);
+      } catch (err) {
+        setValidateResp(
+          new CheckSqlQueryResponse({
+            isValid: false,
+            erorrMessage: getErrorMessage(err),
+          })
+        );
+      }
     }
   }
 
@@ -129,13 +150,12 @@ export default function EditItem(props: Props): ReactElement {
     try {
       setTableRowCountResp(undefined);
       setCalculatingRowCount(true);
-      const resp = await getTableRowCount(
-        account?.id ?? '',
-        connectionId,
-        item?.schema ?? '',
-        item?.table ?? '',
-        item?.where
-      );
+      const resp = await getRowCountByTable({
+        connectionId: connectionId,
+        schema: item?.schema,
+        table: item?.table,
+        whereClause: item?.where,
+      });
       setTableRowCountResp(resp);
       setRowCountError('');
     } catch (err) {
@@ -180,9 +200,14 @@ export default function EditItem(props: Props): ReactElement {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-row justify-between">
+      <div className="flex flex-col md:flex-row justify-between gap-2 md:gap-0">
         <div className="flex flex-row gap-4">
-          <div className="flex flex-row gap-2 items-center">
+          <div
+            className={cn(
+              'flex flex-row gap-2 items-center',
+              showSchema(connectionType) ? undefined : 'hidden'
+            )}
+          >
             <span className="font-semibold tracking-tight">Schema</span>
             <Badge
               className="px-4 py-2 dark:border-gray-700"
@@ -205,58 +230,65 @@ export default function EditItem(props: Props): ReactElement {
           </div>
         </div>
         <div className="flex flex-row gap-4">
-          <TooltipProvider>
-            <Tooltip delayDuration={200}>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!item?.where}
-                  onClick={() => onGetRowCount()}
+          {showRowCountButton && (
+            <>
+              <TooltipProvider>
+                <Tooltip delayDuration={200}>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      disabled={!item?.where}
+                      onClick={() => onGetRowCount()}
+                    >
+                      {calculatingRowCount ? (
+                        <Spinner className="text-black dark:text-white" />
+                      ) : (
+                        <ButtonText text={'Row Count'} />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>
+                    <p>
+                      Attempts to run a SQL COUNT(*) statement against the
+                      source connection for the table with the included WHERE
+                      clause
+                    </p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              {tableRowCountResp && tableRowCountResp.count >= 0 ? (
+                <Badge
+                  variant="darkOutline"
+                  className="dark:bg-gray-800 dark:border-gray-800"
                 >
-                  {calculatingRowCount ? (
-                    <Spinner className="text-black dark:text-white" />
-                  ) : (
-                    <ButtonText text={'Row Count'} />
-                  )}
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  Attempts to run a SQL COUNT(*) statement against the source
-                  connection for the table with the included WHERE clause
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-          {tableRowCountResp && tableRowCountResp.count >= 0 ? (
-            <Badge
-              variant="darkOutline"
-              className="dark:bg-gray-800 dark:border-gray-800"
-            >
-              {tableRowCountResp.count.toString()}
-            </Badge>
-          ) : null}
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  disabled={!item}
-                  onClick={() => onValidate()}
-                >
-                  <ButtonText text="Validate" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  Attempts to run a SQL PREPARE statement against the source
-                  connection for the table with the included WHERE clause
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+                  {tableRowCountResp.count.toString()}
+                </Badge>
+              ) : null}
+            </>
+          )}
+          {showValidateButton && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={!item}
+                    onClick={() => onValidate()}
+                  >
+                    <ButtonText text="Validate" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>
+                    Attempts to run a SQL PREPARE statement against the source
+                    connection for the table with the included WHERE clause
+                  </p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           <Button
             type="button"
             variant="secondary"
@@ -318,52 +350,8 @@ export default function EditItem(props: Props): ReactElement {
   );
 }
 
-async function validateSql(
-  accountId: string,
-  connectionId: string,
-  query: string
-): Promise<CheckSqlQueryResponse> {
-  const queryParams = new URLSearchParams({
-    query,
-  });
-  const res = await fetch(
-    `/api/accounts/${accountId}/connections/${connectionId}/check-query?${queryParams.toString()}`,
-    {
-      method: 'GET',
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return CheckSqlQueryResponse.fromJson(await res.json());
-}
-
-async function getTableRowCount(
-  accountId: string,
-  connectionId: string,
-  schema: string,
-  table: string,
-  where?: string
-): Promise<GetTableRowCountResponse> {
-  const queryParams = new URLSearchParams({
-    schema,
-    table,
-  });
-  if (where) {
-    queryParams.set('where', where);
-  }
-  const res = await fetch(
-    `/api/accounts/${accountId}/connections/${connectionId}/get-table-row-count?${queryParams.toString()}`,
-    {
-      method: 'GET',
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return GetTableRowCountResponse.fromJson(await res.json());
+function showSchema(connectionType: ConnectionConfigCase | null): boolean {
+  return connectionType === 'pgConfig' || connectionType === 'mysqlConfig';
 }
 
 function shouldTriggerAutocomplete(text: string): boolean {

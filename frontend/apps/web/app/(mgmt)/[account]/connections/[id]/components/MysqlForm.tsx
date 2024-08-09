@@ -4,6 +4,7 @@ import FormError from '@/components/FormError';
 import { PasswordInput } from '@/components/PasswordComponent';
 import Spinner from '@/components/Spinner';
 import RequiredLabel from '@/components/labels/RequiredLabel';
+import PermissionsDialog from '@/components/permissions/PermissionsDialog';
 import { useAccount } from '@/components/providers/account-provider';
 import {
   Accordion,
@@ -35,20 +36,24 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import {
   MYSQL_CONNECTION_PROTOCOLS,
+  MysqlEditConnectionFormContext,
   MysqlFormValues,
 } from '@/yup-validations/connections';
+import { useMutation } from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import {
   CheckConnectionConfigResponse,
   UpdateConnectionResponse,
 } from '@neosync/sdk';
 import {
-  CheckCircledIcon,
-  ExclamationTriangleIcon,
-} from '@radix-ui/react-icons';
+  checkConnectionConfig,
+  isConnectionNameAvailable,
+  updateConnection,
+} from '@neosync/sdk/connectquery';
+import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import { ReactElement, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { checkMysqlConnection, updateMysqlConnection } from '../../util';
+import { buildConnectionConfigMysql } from '../../util';
 
 interface Props {
   connectionId: string;
@@ -62,36 +67,46 @@ export default function MysqlForm(props: Props) {
   const { account } = useAccount();
 
   // used to know which tab - host or url that the user is on when we submit the form
-  const [activeTab, setActiveTab] = useState<string>(
+  const [activeTab, setActiveTab] = useState<'host' | 'url'>(
     defaultValues.url ? 'url' : 'host'
   );
+  const { mutateAsync: isConnectionNameAvailableAsync } = useMutation(
+    isConnectionNameAvailable
+  );
 
-  const form = useForm<MysqlFormValues>({
+  const form = useForm<MysqlFormValues, MysqlEditConnectionFormContext>({
+    mode: 'onChange',
     resolver: yupResolver(MysqlFormValues),
     values: defaultValues,
     context: {
       originalConnectionName: defaultValues.connectionName,
       accountId: account?.id ?? '',
       activeTab: activeTab,
+      isConnectionNameAvailable: isConnectionNameAvailableAsync,
     },
   });
+  const { mutateAsync: createMysqlConnection } = useMutation(updateConnection);
+  const { mutateAsync: checkMysqlConnection } = useMutation(
+    checkConnectionConfig
+  );
   const [validationResponse, setValidationResponse] = useState<
     CheckConnectionConfigResponse | undefined
   >();
-
   const [isValidating, setIsValidating] = useState<boolean>(false);
+  const [openPermissionDialog, setOpenPermissionDialog] =
+    useState<boolean>(false);
 
   async function onSubmit(values: MysqlFormValues) {
     try {
-      const connection = await updateMysqlConnection(
-        {
+      const connection = await createMysqlConnection({
+        id: connectionId,
+        name: values.connectionName,
+        connectionConfig: buildConnectionConfigMysql({
           ...values,
           url: activeTab === 'url' ? values.url : undefined,
           db: values.db,
-        },
-        account?.id ?? '',
-        connectionId
-      );
+        }),
+      });
       onSaved(connection);
     } catch (err) {
       console.error(err);
@@ -136,7 +151,7 @@ export default function MysqlForm(props: Props) {
 
         <RadioGroup
           defaultValue="url"
-          onValueChange={(e) => setActiveTab(e)}
+          onValueChange={(e) => setActiveTab(e as 'host' | 'url')}
           value={activeTab}
         >
           <div className="flex flex-col md:flex-row gap-4">
@@ -458,6 +473,16 @@ export default function MysqlForm(props: Props) {
             </AccordionContent>
           </AccordionItem>
         </Accordion>
+        <PermissionsDialog
+          checkResponse={
+            validationResponse ?? new CheckConnectionConfigResponse({})
+          }
+          openPermissionDialog={openPermissionDialog}
+          setOpenPermissionDialog={setOpenPermissionDialog}
+          isValidating={isValidating}
+          connectionName={form.getValues('connectionName')}
+          connectionType="mysql"
+        />
         <div className="flex flex-row gap-3 justify-between">
           <Button
             variant="outline"
@@ -465,17 +490,16 @@ export default function MysqlForm(props: Props) {
               setIsValidating(true);
               try {
                 const values = form.getValues();
-                const res = await checkMysqlConnection(
-                  {
+                const res = await checkMysqlConnection({
+                  connectionConfig: buildConnectionConfigMysql({
                     ...values,
                     url: activeTab === 'url' ? values.url : undefined,
                     db: values.db,
-                  },
-                  account?.id ?? ''
-                );
+                  }),
+                });
 
-                setIsValidating(false);
                 setValidationResponse(res);
+                setOpenPermissionDialog(!!res?.isConnected);
               } catch (err) {
                 setValidationResponse(
                   new CheckConnectionConfigResponse({
@@ -509,9 +533,6 @@ export default function MysqlForm(props: Props) {
             />
           </Button>
         </div>
-        {validationResponse && validationResponse.isConnected && (
-          <SuccessAlert description={'Successfully connected!'} />
-        )}
         {validationResponse && !validationResponse.isConnected && (
           <ErrorAlert
             title="Unable to connect"
@@ -522,24 +543,6 @@ export default function MysqlForm(props: Props) {
         )}
       </form>
     </Form>
-  );
-}
-
-interface SuccessAlertProps {
-  description: string;
-}
-
-function SuccessAlert(props: SuccessAlertProps): ReactElement {
-  const { description } = props;
-  return (
-    <Alert variant="success">
-      <div className="flex flex-row items-center gap-2">
-        <CheckCircledIcon className="h-4 w-4 text-green-900 dark:text-green-400" />
-        <div className="font-normal text-green-900 dark:text-green-400">
-          {description}
-        </div>
-      </div>
-    </Alert>
   );
 }
 

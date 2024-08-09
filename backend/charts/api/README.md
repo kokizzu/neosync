@@ -35,6 +35,7 @@ A Helm chart for the Neosync Backend API
 | db.password | string | `nil` | The username's password for authentication |
 | db.port | int | `5432` | The database port |
 | db.username | string | `nil` | The username that will be used for authentication |
+| deploymentAnnotations | object | `{}` | Provide a map of deployment annotations that will be attached to the deployment's annotations |
 | extraEnvVars | list | `[]` | Provide extra environment variables that will be applied to the deployment. |
 | fullnameOverride | string | `nil` | Fully overrides the chart name |
 | host | string | `"0.0.0.0"` | Sets the host that the backend will listen on. 0.0.0.0 is common for Kubernetes workloads. |
@@ -64,6 +65,7 @@ A Helm chart for the Neosync Backend API
 | nucleusEnv | string | `nil` | Mostly used by NeosyncCloud. Adds a special tag to the logging to determine what environment is running |
 | otel.enabled | bool | `false` | whether or not to enable open telemetry settings |
 | otel.otlpPort | int | `4317` | Specifies the port that otel is listening on that the service will export metrics and traces to |
+| podAnnotations | object | `{}` | Provide a map of pod annotations that will be attached to the deployment's pod template annotations |
 | protometrics.apiKey | string | `nil` | Optionally provide an API key if the prometheus service requires authentication |
 | protometrics.enabled | bool | `false` | Will enable the metrics service proto |
 | protometrics.url | string | `nil` | The url, will default to http://localhost:9090 if not provided. Should be a prometheus compliant API |
@@ -83,6 +85,7 @@ A Helm chart for the Neosync Backend API
 | serviceAccount.name | string | `nil` | The name of the service account to use. If namenot set and create is true, a name is generated using fullname template |
 | servicePort | int | `80` | The K8s service port |
 | shutdownTimeoutSeconds | string | `nil` | Not currently used |
+| sidecarContainers | list | `[]` | Provide sidecars that will be appended directly to the deployment next to the user-container |
 | temporal.certificate.certContents | string | `nil` | The full contents of the certificate. Provide this or the certFilePath, not both. |
 | temporal.certificate.certFilePath | string | `nil` | The location of the certificate file |
 | temporal.certificate.keyContents | string | `nil` | The full contents of the key. Provide this or the keyFilePath, not both. |

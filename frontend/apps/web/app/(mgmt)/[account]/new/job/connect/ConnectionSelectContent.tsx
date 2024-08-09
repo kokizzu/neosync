@@ -10,8 +10,10 @@ interface Props {
   openai?: Connection[];
   mongodb?: Connection[];
   gcpcs?: Connection[];
+  dynamodb?: Connection[];
 
-  newConnectionValue: string;
+  // Provide a value to include the new connection item
+  newConnectionValue?: string;
 }
 export default function ConnectionSelectContent(props: Props): ReactElement {
   const {
@@ -21,6 +23,7 @@ export default function ConnectionSelectContent(props: Props): ReactElement {
     openai = [],
     mongodb = [],
     gcpcs = [],
+    dynamodb = [],
     newConnectionValue,
   } = props;
   const selectgroups = [
@@ -30,6 +33,7 @@ export default function ConnectionSelectContent(props: Props): ReactElement {
     [s3, 'AWS S3'],
     [openai, 'OpenAI'],
     [gcpcs, 'GCP Cloud Storage'],
+    [dynamodb, 'DynamoDB'],
   ] as const;
   return (
     <>
@@ -50,16 +54,18 @@ export default function ConnectionSelectContent(props: Props): ReactElement {
             </SelectGroup>
           )
       )}
-      <SelectItem
-        className="cursor-pointer"
-        key="new-dst-connection"
-        value={newConnectionValue}
-      >
-        <div className="flex flex-row gap-1 items-center">
-          <PlusIcon />
-          <p>New Connection</p>
-        </div>
-      </SelectItem>
+      {!!newConnectionValue && (
+        <SelectItem
+          className="cursor-pointer"
+          key="new-dst-connection"
+          value={newConnectionValue}
+        >
+          <div className="flex flex-row gap-1 items-center">
+            <PlusIcon />
+            <p>New Connection</p>
+          </div>
+        </SelectItem>
+      )}
     </>
   );
 }

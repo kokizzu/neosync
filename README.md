@@ -23,7 +23,7 @@ Open Source Data Anonymization and Synthetic Data Orchestration
  | <a href="https://discord.com/invite/MFAMgnp4HF">Discord</a>
  | <a href="https://www.neosync.dev/blog">Blog</a>
  | <a href="https://docs.neosync.dev/changelog">Changelog</a>
- |
+ | <a href="https://neosync.productlane.com/roadmap">Roadmap</a>
 </div>
 
  <br>
@@ -41,6 +41,9 @@ Open Source Data Anonymization and Synthetic Data Orchestration
   </a>
   <a href="https://x.com/neosynccloud">
     <img alt="Follow X" src="https://img.shields.io/twitter/follow/neosynccloud?label=Follow"/>
+  </a>
+  <a href="https://artifacthub.io/packages/search?repo=neosync">
+    <img alt="ArtifactHub Neosync" src="https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/neosync" />
   </a>
 </div>
 

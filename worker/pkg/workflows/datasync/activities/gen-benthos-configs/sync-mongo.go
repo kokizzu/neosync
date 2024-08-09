@@ -29,8 +29,6 @@ func (b *benthosBuilder) getMongoDbSyncBenthosConfigResponses(
 	}
 
 	groupedMappings := groupMappingsByTable(job.GetMappings())
-	groupedTableMapping := getTableMappingsMap(groupedMappings)
-	colTransformerMap := getColumnTransformerMap(groupedTableMapping) // schema.table ->  column -> transformer
 
 	benthosConfigs := []*BenthosConfigResponse{}
 	for _, tableMapping := range groupedMappings {
@@ -60,20 +58,20 @@ func (b *benthosBuilder) getMongoDbSyncBenthosConfigResponses(
 		for _, jm := range tableMapping.Mappings {
 			columns = append(columns, jm.Column)
 		}
-		colTransformers := colTransformerMap[fmt.Sprintf("%s.%s", tableMapping.Schema, tableMapping.Table)]
 
 		processorConfigs, err := buildProcessorConfigsByRunType(
 			ctx,
 			b.transformerclient,
-			&tabledependency.RunConfig{RunType: tabledependency.RunTypeInsert},
+			&tabledependency.RunConfig{RunType: tabledependency.RunTypeInsert, Table: tableMapping.Table, SelectColumns: columns, InsertColumns: columns, SplitColumnPaths: true},
 			map[string][]*referenceKey{},
 			map[string][]*referenceKey{},
 			b.jobId,
 			b.runId,
 			&shared.RedisConfig{},
-			colTransformers,
 			tableMapping.Mappings,
 			map[string]*sqlmanager_shared.ColumnInfo{},
+			job.GetSource().GetOptions(),
+			columns,
 		)
 		if err != nil {
 			return nil, err

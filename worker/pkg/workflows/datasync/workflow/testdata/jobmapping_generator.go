@@ -9,6 +9,8 @@ import (
 	"html/template"
 	"io"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
 
 	mgmtv1alpha1 "github.com/nucleuscloud/neosync/backend/gen/go/protos/mgmt/v1alpha1"
@@ -19,6 +21,7 @@ import (
 type Input struct {
 	Folder  string `json:"folder"`
 	SqlFile string `json:"sql_file"`
+	Driver  string `json:"driver"`
 }
 
 type Column struct {
@@ -39,7 +42,7 @@ type JobMapping struct {
 	Config      string
 }
 
-func parseSQLSchema(sql string) ([]*Table, error) {
+func parsePostegresStatements(sql string) ([]*Table, error) {
 	tree, err := pgquery.Parse(sql)
 	if err != nil {
 		return nil, err
@@ -73,6 +76,61 @@ func parseSQLSchema(sql string) ([]*Table, error) {
 		return nil, fmt.Errorf("unable to determine schema")
 	}
 	return tables, nil
+}
+
+// todo fix very brittle
+func parseSQLStatements(sql string) []*Table {
+	lines := strings.Split(sql, "\n")
+	tableColumnsMap := make(map[string][]string)
+	var currentSchema, currentTable string
+
+	reUSE := regexp.MustCompile(`USE\s+(\w+);`)
+	reCreateTable := regexp.MustCompile(`CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)\s*\.\s*(\w+)\s*\(`)
+	reCreateTableNoSchema := regexp.MustCompile(`CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)\s*\(`)
+	reColumn := regexp.MustCompile(`^\s*([\w]+)\s+[\w\(\)]+.*`)
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if matches := reUSE.FindStringSubmatch(line); len(matches) > 1 {
+			currentSchema = matches[1]
+		} else if matches := reCreateTable.FindStringSubmatch(line); len(matches) > 2 {
+			currentSchema = matches[1]
+			currentTable = matches[2]
+		} else if matches := reCreateTableNoSchema.FindStringSubmatch(line); len(matches) > 1 {
+			currentTable = matches[1]
+		} else if currentTable != "" {
+			if matches := reColumn.FindStringSubmatch(line); len(matches) > 1 {
+				columnName := matches[1]
+				if slices.Contains([]string{"primary key", "constraint", "key", "unique", "primary", "alter"}, strings.ToLower(matches[1])) {
+					continue
+				}
+				key := currentSchema + "." + currentTable
+				tableColumnsMap[key] = append(tableColumnsMap[key], columnName)
+			} else if strings.HasPrefix(line, "PRIMARY KEY") || strings.HasPrefix(line, "CONSTRAINT") || strings.HasPrefix(line, "UNIQUE") || strings.HasPrefix(line, "KEY") || strings.HasPrefix(line, "ENGINE") || strings.HasPrefix(line, ")") {
+				// Ignore key constraints and end of table definition
+				if strings.HasPrefix(line, ")") {
+					currentTable = ""
+				}
+			}
+		}
+	}
+	res := []*Table{}
+	for table, cols := range tableColumnsMap {
+		tableCols := []*Column{}
+		for _, c := range cols {
+			tableCols = append(tableCols, &Column{
+				Name: c,
+			})
+		}
+		split := strings.Split(table, ".")
+		res = append(res, &Table{
+			Schema:  split[0],
+			Name:    split[1],
+			Columns: tableCols,
+		})
+	}
+
+	return res
 }
 
 func generateJobMapping(tables []*Table) []*mgmtv1alpha1.JobMapping {
@@ -171,7 +229,14 @@ func main() {
 		return
 	}
 	for _, input := range inputs {
-		goPkgName := strings.ReplaceAll(fmt.Sprintf("%s_%s", goPkg, input.Folder), "-", "")
+		folderSplit := strings.Split(input.Folder, "/")
+		var goPkgName string
+		if len(folderSplit) == 1 {
+			goPkgName = strings.ReplaceAll(fmt.Sprintf("%s_%s", goPkg, input.Folder), "-", "")
+		} else if len(folderSplit) > 1 {
+			lastTwo := folderSplit[len(folderSplit)-2:]
+			goPkgName = strings.ReplaceAll(strings.Join(lastTwo, "_"), "-", "")
+		}
 		sqlFile, err := os.Open(fmt.Sprintf("%s/%s", input.Folder, input.SqlFile))
 		if err != nil {
 			fmt.Println("failed to open file: %s", err)
@@ -185,10 +250,17 @@ func main() {
 		sqlContent := string(byteValue)
 		sqlFile.Close()
 
-		tables, err := parseSQLSchema(sqlContent)
-		if err != nil {
-			fmt.Println("Error parsing SQL schema:", err)
-			return
+		var tables []*Table
+		if input.Driver == "postgres" {
+			t, err := parsePostegresStatements(sqlContent)
+			if err != nil {
+				fmt.Println("Error parsing postgres SQL schema:", err)
+				return
+			}
+			tables = t
+		} else if input.Driver == "mysql" {
+			t := parseSQLStatements(sqlContent)
+			tables = t
 		}
 
 		jobMapping := generateJobMapping(tables)

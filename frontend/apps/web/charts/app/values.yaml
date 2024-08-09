@@ -15,6 +15,12 @@ fullnameOverride:
 # -- Define a list of image pull secrets that will be used by the deployment
 imagePullSecrets: []
 
+# -- Provide a map of deployment annotations that will be attached to the deployment's annotations
+deploymentAnnotations: {}
+
+# -- Provide a map of pod annotations that will be attached to the deployment's pod template annotations
+podAnnotations: {}
+
 # serviceAccount Specify service account options for the deployment
 serviceAccount:
   # -- Specifies whether a service account should be created
@@ -33,6 +39,21 @@ otel:
   enabled: false
   # -- Specifies the port that otel is listening on that the service will export metrics and traces to
   otlpPort: 4317
+
+# Set requests and limits on the backend to change its performance
+resources:
+  ## Sets the CPU and Memory baseline. These are low-usage defaults. Change these depending on your needs.
+  requests:
+    # -- Sets the CPU amount to be requested
+    cpu: '100m'
+    # -- Sets the Memory amount to be requested
+    memory: '128Mi'
+  ## Sets the max CPU and Memory. These are low-usage defaults. Change these depending on your needs.
+  limits:
+    # -- Sets the max CPU amount
+    cpu: '500m'
+    # -- Sets the max Memory amount
+    memory: '512Mi'
 
 # Adds annotations and labels to the deployment to opt it in to Istio service mesh. See the Neosync k8s docs for more details. This may be omitted and applied manually via the deployment's annotations and labels
 istio:
@@ -87,6 +108,8 @@ auth:
   providerId:
   # -- The display name of the provider
   providerName:
+  # -- Whether or not to trust the external host (most likely want this to be true if running behind a load balancer)
+  trustHost: true
 
 # check out the ingress.yaml file to see what ither values are available for configuration on this object.
 ingress:
@@ -133,3 +156,6 @@ updateStrategy:
 
 # -- Provide extra environment variables that will be applied to the deployment.
 extraEnvVars: []
+
+# -- Provide sidecars that will be appended directly to the deployment next to the user-container
+sidecarContainers: []

@@ -12,14 +12,16 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { useToast } from '@/components/ui/use-toast';
 import { convertNanosecondsToMinutes, getErrorMessage } from '@/util/util';
+import { useMutation } from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { Job } from '@neosync/sdk';
+import { setJobSyncOptions } from '@neosync/sdk/connectquery';
 import { ReactElement } from 'react';
 import { useForm } from 'react-hook-form';
+import { toast } from 'sonner';
 import { ActivityOptionsSchema } from '../../../new/job/schema';
-import { updateJobSyncActivityOptions } from '../../util';
+import { toActivityOptions } from '../../util';
 
 interface Props {
   job: Job;
@@ -30,7 +32,6 @@ export default function ActivitySyncOptionsCard({
   job,
   mutate,
 }: Props): ReactElement {
-  const { toast } = useToast();
   const form = useForm<ActivityOptionsSchema>({
     mode: 'onChange',
     resolver: yupResolver<ActivityOptionsSchema>(ActivityOptionsSchema),
@@ -47,30 +48,26 @@ export default function ActivitySyncOptionsCard({
     },
   });
   const { account } = useAccount();
+  const { mutateAsync: updateJobSyncActivityOptions } =
+    useMutation(setJobSyncOptions);
 
   async function onSubmit(values: ActivityOptionsSchema) {
     if (!account?.id) {
       return;
     }
     try {
-      const resp = await updateJobSyncActivityOptions(
-        account.id,
-        job.id,
-        values
-      );
-      toast({
-        title: 'Successfully updated job workflow options!',
-        variant: 'success',
+      const resp = await updateJobSyncActivityOptions({
+        id: job.id,
+        syncOptions: toActivityOptions(values),
       });
+      toast.success('Successfully updated job workflow options!');
       if (resp.job) {
         mutate(resp.job);
       }
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to update job workflow options',
+      toast.error('Unable to update job workflow options', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }

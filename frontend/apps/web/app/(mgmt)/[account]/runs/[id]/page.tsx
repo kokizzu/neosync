@@ -13,21 +13,28 @@ import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useToast } from '@/components/ui/use-toast';
-import { refreshWhenJobRunning, useGetJobRun } from '@/libs/hooks/useGetJobRun';
 import { JobRunStatus as JobRunStatusEnum } from '@neosync/sdk';
 import { TiCancel } from 'react-icons/ti';
 
 import ResourceId from '@/components/ResourceId';
+import { useGetSystemAppConfig } from '@/libs/hooks/useGetSystemAppConfig';
 import {
   refreshEventsWhenEventsIncomplete,
-  useGetJobRunEvents,
-} from '@/libs/hooks/useGetJobRunEvents';
-import { useGetSystemAppConfig } from '@/libs/hooks/useGetSystemAppConfig';
+  refreshJobRunWhenJobRunning,
+} from '@/libs/utils';
 import { formatDateTime, getErrorMessage } from '@/util/util';
+import { useMutation, useQuery } from '@connectrpc/connect-query';
+import {
+  cancelJobRun,
+  deleteJobRun,
+  getJobRun,
+  getJobRunEvents,
+  terminateJobRun,
+} from '@neosync/sdk/connectquery';
 import { ArrowRightIcon, Cross2Icon, TrashIcon } from '@radix-ui/react-icons';
 import { useRouter } from 'next/navigation';
 import { ReactElement } from 'react';
+import { toast } from 'sonner';
 import JobRunStatus from '../components/JobRunStatus';
 import JobRunActivityTable from './components/JobRunActivityTable';
 import JobRunLogs from './components/JobRunLogs';
@@ -35,75 +42,87 @@ import JobRunLogs from './components/JobRunLogs';
 export default function Page({ params }: PageProps): ReactElement {
   const { account } = useAccount();
   const accountId = account?.id || '';
-  const id = params?.id ?? '';
+  const id = decodeURIComponent(params?.id ?? '');
   const router = useRouter();
-  const { toast } = useToast();
   const { data: systemAppConfigData, isLoading: isSystemAppConfigDataLoading } =
     useGetSystemAppConfig();
-  const { data, isLoading, mutate } = useGetJobRun(id, accountId, {
-    refreshIntervalFn: refreshWhenJobRunning,
-  });
+  const {
+    data,
+    isLoading,
+    refetch: mutate,
+  } = useQuery(
+    getJobRun,
+    { jobRunId: id, accountId: accountId },
+    {
+      enabled: !!id && !!accountId,
+      refetchInterval(query) {
+        return query.state.data
+          ? refreshJobRunWhenJobRunning(query.state.data)
+          : 0;
+      },
+    }
+  );
+  const jobRun = data?.jobRun;
 
   const {
     data: eventData,
     isLoading: eventsIsLoading,
-    isValidating,
-    mutate: eventMutate,
-  } = useGetJobRunEvents(id, accountId, {
-    refreshIntervalFn: refreshEventsWhenEventsIncomplete,
-  });
+    isFetching: isValidating,
+    refetch: eventMutate,
+  } = useQuery(
+    getJobRunEvents,
+    { jobRunId: id, accountId: accountId },
+    {
+      enabled: !!id && !!accountId,
+      refetchInterval(query) {
+        return query.state.data
+          ? refreshEventsWhenEventsIncomplete(query.state.data)
+          : 0;
+      },
+    }
+  );
 
-  const jobRun = data?.jobRun;
+  const { mutateAsync: removeJobRunAsync } = useMutation(deleteJobRun);
+  const { mutateAsync: cancelJobRunAsync } = useMutation(cancelJobRun);
+  const { mutateAsync: terminateJobRunAsync } = useMutation(terminateJobRun);
 
   async function onDelete(): Promise<void> {
     try {
-      await removeJobRun(id, accountId);
-      toast({
-        title: 'Job run removed successfully!',
-      });
+      await removeJobRunAsync({ accountId: accountId, jobRunId: id });
+      toast.success('Job run removed successfully!');
       router.push(`/${account?.name}/runs`);
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to remove job run',
+      toast.error('Unable to remove job run', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
 
   async function onCancel(): Promise<void> {
     try {
-      await cancelJobRun(id, accountId);
-      toast({
-        title: 'Job run canceled successfully!',
-      });
+      await cancelJobRunAsync({ accountId, jobRunId: id });
+      toast.success('Job run canceled successfully!');
       mutate();
       eventMutate();
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to cancel job run',
+      toast.error('Unable to cancel job run', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
 
   async function onTerminate(): Promise<void> {
     try {
-      await terminateJobRun(id, accountId);
-      toast({
-        title: 'Job run terminated successfully!',
-      });
+      await terminateJobRunAsync({ accountId, jobRunId: id });
+      toast.success('Job run terminated successfully!');
       mutate();
       eventMutate();
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to terminate job run',
+      toast.error('Unable to terminate job run', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
@@ -317,52 +336,4 @@ function ButtonLink(props: ButtonProps): ReactElement {
       />
     </Button>
   );
-}
-
-async function removeJobRun(
-  jobRunId: string,
-  accountId: string
-): Promise<void> {
-  const res = await fetch(`/api/accounts/${accountId}/runs/${jobRunId}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  await res.json();
-}
-
-async function cancelJobRun(
-  jobRunId: string,
-  accountId: string
-): Promise<void> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/runs/${jobRunId}/cancel`,
-    {
-      method: 'PUT',
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  await res.json();
-}
-
-async function terminateJobRun(
-  jobRunId: string,
-  accountId: string
-): Promise<void> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/runs/${jobRunId}/terminate`,
-    {
-      method: 'PUT',
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  await res.json();
 }

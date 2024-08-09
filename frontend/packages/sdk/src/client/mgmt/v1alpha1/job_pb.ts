@@ -383,6 +383,12 @@ export class JobSourceOptions extends Message<JobSourceOptions> {
      */
     value: MongoDBSourceConnectionOptions;
     case: "mongodb";
+  } | {
+    /**
+     * @generated from field: mgmt.v1alpha1.DynamoDBSourceConnectionOptions dynamodb = 7;
+     */
+    value: DynamoDBSourceConnectionOptions;
+    case: "dynamodb";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<JobSourceOptions>) {
@@ -399,6 +405,7 @@ export class JobSourceOptions extends Message<JobSourceOptions> {
     { no: 4, name: "generate", kind: "message", T: GenerateSourceOptions, oneof: "config" },
     { no: 5, name: "ai_generate", kind: "message", T: AiGenerateSourceOptions, oneof: "config" },
     { no: 6, name: "mongodb", kind: "message", T: MongoDBSourceConnectionOptions, oneof: "config" },
+    { no: 7, name: "dynamodb", kind: "message", T: DynamoDBSourceConnectionOptions, oneof: "config" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JobSourceOptions {
@@ -515,16 +522,22 @@ export class JobDestination extends Message<JobDestination> {
  */
 export class AiGenerateSourceOptions extends Message<AiGenerateSourceOptions> {
   /**
+   * The connection id that corresponds with an AI-based Neosync connection
+   *
    * @generated from field: string ai_connection_id = 1;
    */
   aiConnectionId = "";
 
   /**
+   * The list of schemas (and their tables) along with any configuration options that will be used to generate data for.
+   *
    * @generated from field: repeated mgmt.v1alpha1.AiGenerateSourceSchemaOption schemas = 2;
    */
   schemas: AiGenerateSourceSchemaOption[] = [];
 
   /**
+   * An optional connection id that will be used as the basis for the shape of data to be generated.
+   *
    * @generated from field: optional string fk_source_connection_id = 3;
    */
   fkSourceConnectionId?: string;
@@ -543,6 +556,13 @@ export class AiGenerateSourceOptions extends Message<AiGenerateSourceOptions> {
    */
   userPrompt?: string;
 
+  /**
+   * The batch size that will be used to generate X number of records. This is global and will be applied to all tables configured.
+   *
+   * @generated from field: optional int64 generate_batch_size = 6;
+   */
+  generateBatchSize?: bigint;
+
   constructor(data?: PartialMessage<AiGenerateSourceOptions>) {
     super();
     proto3.util.initPartial(data, this);
@@ -556,6 +576,7 @@ export class AiGenerateSourceOptions extends Message<AiGenerateSourceOptions> {
     { no: 3, name: "fk_source_connection_id", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
     { no: 4, name: "model_name", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 5, name: "user_prompt", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 6, name: "generate_batch_size", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): AiGenerateSourceOptions {
@@ -580,11 +601,15 @@ export class AiGenerateSourceOptions extends Message<AiGenerateSourceOptions> {
  */
 export class AiGenerateSourceSchemaOption extends Message<AiGenerateSourceSchemaOption> {
   /**
+   * The dataabase schema
+   *
    * @generated from field: string schema = 1;
    */
   schema = "";
 
   /**
+   * The list of tables (and their configuration) that reside within the schema to receive generated data
+   *
    * @generated from field: repeated mgmt.v1alpha1.AiGenerateSourceTableOption tables = 2;
    */
   tables: AiGenerateSourceTableOption[] = [];
@@ -623,11 +648,15 @@ export class AiGenerateSourceSchemaOption extends Message<AiGenerateSourceSchema
  */
 export class AiGenerateSourceTableOption extends Message<AiGenerateSourceTableOption> {
   /**
+   * The table that will be used to. 1. The schema of the table will be injected into the prompt, of which the resulting data will then be inserted.
+   *
    * @generated from field: string table = 1;
    */
   table = "";
 
   /**
+   * The total number of records to be generated.
+   *
    * @generated from field: int64 row_count = 2;
    */
   rowCount = protoInt64.zero;
@@ -791,10 +820,14 @@ export class GenerateSourceTableOption extends Message<GenerateSourceTableOption
 }
 
 /**
+ * MongoDB connection options for a job source
+ *
  * @generated from message mgmt.v1alpha1.MongoDBSourceConnectionOptions
  */
 export class MongoDBSourceConnectionOptions extends Message<MongoDBSourceConnectionOptions> {
   /**
+   * The unique connection id to a mongo connection configuration
+   *
    * @generated from field: string connection_id = 1;
    */
   connectionId = "";
@@ -824,6 +857,185 @@ export class MongoDBSourceConnectionOptions extends Message<MongoDBSourceConnect
 
   static equals(a: MongoDBSourceConnectionOptions | PlainMessage<MongoDBSourceConnectionOptions> | undefined, b: MongoDBSourceConnectionOptions | PlainMessage<MongoDBSourceConnectionOptions> | undefined): boolean {
     return proto3.util.equals(MongoDBSourceConnectionOptions, a, b);
+  }
+}
+
+/**
+ * DynamoDB connection options for a job source
+ *
+ * @generated from message mgmt.v1alpha1.DynamoDBSourceConnectionOptions
+ */
+export class DynamoDBSourceConnectionOptions extends Message<DynamoDBSourceConnectionOptions> {
+  /**
+   * The unique connection id to a dynamodb connection configuration
+   *
+   * @generated from field: string connection_id = 1;
+   */
+  connectionId = "";
+
+  /**
+   * List of table option configurations for any mapped source table.
+   * Any table listed in this must also be present as a job mapping table to be applied.
+   *
+   * @generated from field: repeated mgmt.v1alpha1.DynamoDBSourceTableOption tables = 2;
+   */
+  tables: DynamoDBSourceTableOption[] = [];
+
+  /**
+   * Default transformations for any unmapped keys
+   *
+   * @generated from field: mgmt.v1alpha1.DynamoDBSourceUnmappedTransformConfig unmapped_transforms = 3;
+   */
+  unmappedTransforms?: DynamoDBSourceUnmappedTransformConfig;
+
+  /**
+   * Enforces strong read consistency
+   * False: Eventually Consistent Reads, True: Strongly Consistent Reads
+   * https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html
+   *
+   * @generated from field: bool enable_consistent_read = 4;
+   */
+  enableConsistentRead = false;
+
+  constructor(data?: PartialMessage<DynamoDBSourceConnectionOptions>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "mgmt.v1alpha1.DynamoDBSourceConnectionOptions";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "connection_id", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "tables", kind: "message", T: DynamoDBSourceTableOption, repeated: true },
+    { no: 3, name: "unmapped_transforms", kind: "message", T: DynamoDBSourceUnmappedTransformConfig },
+    { no: 4, name: "enable_consistent_read", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DynamoDBSourceConnectionOptions {
+    return new DynamoDBSourceConnectionOptions().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DynamoDBSourceConnectionOptions {
+    return new DynamoDBSourceConnectionOptions().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DynamoDBSourceConnectionOptions {
+    return new DynamoDBSourceConnectionOptions().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DynamoDBSourceConnectionOptions | PlainMessage<DynamoDBSourceConnectionOptions> | undefined, b: DynamoDBSourceConnectionOptions | PlainMessage<DynamoDBSourceConnectionOptions> | undefined): boolean {
+    return proto3.util.equals(DynamoDBSourceConnectionOptions, a, b);
+  }
+}
+
+/**
+ * @generated from message mgmt.v1alpha1.DynamoDBSourceUnmappedTransformConfig
+ */
+export class DynamoDBSourceUnmappedTransformConfig extends Message<DynamoDBSourceUnmappedTransformConfig> {
+  /**
+   * Byte
+   *
+   * @generated from field: mgmt.v1alpha1.JobMappingTransformer b = 1;
+   */
+  b?: JobMappingTransformer;
+
+  /**
+   * Boolean
+   *
+   * @generated from field: mgmt.v1alpha1.JobMappingTransformer boolean = 2;
+   */
+  boolean?: JobMappingTransformer;
+
+  /**
+   * Number
+   *
+   * @generated from field: mgmt.v1alpha1.JobMappingTransformer n = 4;
+   */
+  n?: JobMappingTransformer;
+
+  /**
+   * String
+   *
+   * @generated from field: mgmt.v1alpha1.JobMappingTransformer s = 6;
+   */
+  s?: JobMappingTransformer;
+
+  constructor(data?: PartialMessage<DynamoDBSourceUnmappedTransformConfig>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "mgmt.v1alpha1.DynamoDBSourceUnmappedTransformConfig";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "b", kind: "message", T: JobMappingTransformer },
+    { no: 2, name: "boolean", kind: "message", T: JobMappingTransformer },
+    { no: 4, name: "n", kind: "message", T: JobMappingTransformer },
+    { no: 6, name: "s", kind: "message", T: JobMappingTransformer },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DynamoDBSourceUnmappedTransformConfig {
+    return new DynamoDBSourceUnmappedTransformConfig().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DynamoDBSourceUnmappedTransformConfig {
+    return new DynamoDBSourceUnmappedTransformConfig().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DynamoDBSourceUnmappedTransformConfig {
+    return new DynamoDBSourceUnmappedTransformConfig().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DynamoDBSourceUnmappedTransformConfig | PlainMessage<DynamoDBSourceUnmappedTransformConfig> | undefined, b: DynamoDBSourceUnmappedTransformConfig | PlainMessage<DynamoDBSourceUnmappedTransformConfig> | undefined): boolean {
+    return proto3.util.equals(DynamoDBSourceUnmappedTransformConfig, a, b);
+  }
+}
+
+/**
+ * @generated from message mgmt.v1alpha1.DynamoDBSourceTableOption
+ */
+export class DynamoDBSourceTableOption extends Message<DynamoDBSourceTableOption> {
+  /**
+   * The table that this configuration will be applied to
+   *
+   * @generated from field: string table = 1;
+   */
+  table = "";
+
+  /**
+   * An optional PartiQL query that may be used for subsetting the DynamoDB table.
+   * This is not a parameterized query and must be valid. Intended to be everything after the WHERE keyword.
+   *
+   * @generated from field: optional string where_clause = 2;
+   */
+  whereClause?: string;
+
+  constructor(data?: PartialMessage<DynamoDBSourceTableOption>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "mgmt.v1alpha1.DynamoDBSourceTableOption";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "table", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "where_clause", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DynamoDBSourceTableOption {
+    return new DynamoDBSourceTableOption().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DynamoDBSourceTableOption {
+    return new DynamoDBSourceTableOption().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DynamoDBSourceTableOption {
+    return new DynamoDBSourceTableOption().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DynamoDBSourceTableOption | PlainMessage<DynamoDBSourceTableOption> | undefined, b: DynamoDBSourceTableOption | PlainMessage<DynamoDBSourceTableOption> | undefined): boolean {
+    return proto3.util.equals(DynamoDBSourceTableOption, a, b);
   }
 }
 
@@ -1185,6 +1397,14 @@ export class JobDestinationOptions extends Message<JobDestinationOptions> {
      */
     value: GcpCloudStorageDestinationConnectionOptions;
     case: "gcpCloudstorageOptions";
+  } | {
+    /**
+     * Destination Connection options for DynamoDB
+     *
+     * @generated from field: mgmt.v1alpha1.DynamoDBDestinationConnectionOptions dynamodb_options = 6;
+     */
+    value: DynamoDBDestinationConnectionOptions;
+    case: "dynamodbOptions";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<JobDestinationOptions>) {
@@ -1200,6 +1420,7 @@ export class JobDestinationOptions extends Message<JobDestinationOptions> {
     { no: 3, name: "mysql_options", kind: "message", T: MysqlDestinationConnectionOptions, oneof: "config" },
     { no: 4, name: "mongodb_options", kind: "message", T: MongoDBDestinationConnectionOptions, oneof: "config" },
     { no: 5, name: "gcp_cloudstorage_options", kind: "message", T: GcpCloudStorageDestinationConnectionOptions, oneof: "config" },
+    { no: 6, name: "dynamodb_options", kind: "message", T: DynamoDBDestinationConnectionOptions, oneof: "config" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JobDestinationOptions {
@@ -1251,7 +1472,7 @@ export class MongoDBDestinationConnectionOptions extends Message<MongoDBDestinat
 }
 
 /**
- * Configuration for Google Cloud Storage Connection Job Options
+ * Configuration for Google Cloud Storage Destination Connection Job Options
  *
  * @generated from message mgmt.v1alpha1.GcpCloudStorageDestinationConnectionOptions
  */
@@ -1280,6 +1501,96 @@ export class GcpCloudStorageDestinationConnectionOptions extends Message<GcpClou
 
   static equals(a: GcpCloudStorageDestinationConnectionOptions | PlainMessage<GcpCloudStorageDestinationConnectionOptions> | undefined, b: GcpCloudStorageDestinationConnectionOptions | PlainMessage<GcpCloudStorageDestinationConnectionOptions> | undefined): boolean {
     return proto3.util.equals(GcpCloudStorageDestinationConnectionOptions, a, b);
+  }
+}
+
+/**
+ * Configuration for DynamoDB Destination Connection Job Options
+ *
+ * @generated from message mgmt.v1alpha1.DynamoDBDestinationConnectionOptions
+ */
+export class DynamoDBDestinationConnectionOptions extends Message<DynamoDBDestinationConnectionOptions> {
+  /**
+   * List of table mappings when piping data from a dynamoDB table to another dynamoDB table
+   *
+   * @generated from field: repeated mgmt.v1alpha1.DynamoDBDestinationTableMapping table_mappings = 1;
+   */
+  tableMappings: DynamoDBDestinationTableMapping[] = [];
+
+  constructor(data?: PartialMessage<DynamoDBDestinationConnectionOptions>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "mgmt.v1alpha1.DynamoDBDestinationConnectionOptions";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "table_mappings", kind: "message", T: DynamoDBDestinationTableMapping, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DynamoDBDestinationConnectionOptions {
+    return new DynamoDBDestinationConnectionOptions().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DynamoDBDestinationConnectionOptions {
+    return new DynamoDBDestinationConnectionOptions().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DynamoDBDestinationConnectionOptions {
+    return new DynamoDBDestinationConnectionOptions().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DynamoDBDestinationConnectionOptions | PlainMessage<DynamoDBDestinationConnectionOptions> | undefined, b: DynamoDBDestinationConnectionOptions | PlainMessage<DynamoDBDestinationConnectionOptions> | undefined): boolean {
+    return proto3.util.equals(DynamoDBDestinationConnectionOptions, a, b);
+  }
+}
+
+/**
+ * Configuration for mapping a source table to a destination table for DynamoDB
+ *
+ * @generated from message mgmt.v1alpha1.DynamoDBDestinationTableMapping
+ */
+export class DynamoDBDestinationTableMapping extends Message<DynamoDBDestinationTableMapping> {
+  /**
+   * The name of the incoming source table
+   *
+   * @generated from field: string source_table = 1;
+   */
+  sourceTable = "";
+
+  /**
+   * The name of the outgoing destination table
+   *
+   * @generated from field: string destination_table = 2;
+   */
+  destinationTable = "";
+
+  constructor(data?: PartialMessage<DynamoDBDestinationTableMapping>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "mgmt.v1alpha1.DynamoDBDestinationTableMapping";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "source_table", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "destination_table", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DynamoDBDestinationTableMapping {
+    return new DynamoDBDestinationTableMapping().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DynamoDBDestinationTableMapping {
+    return new DynamoDBDestinationTableMapping().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DynamoDBDestinationTableMapping {
+    return new DynamoDBDestinationTableMapping().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DynamoDBDestinationTableMapping | PlainMessage<DynamoDBDestinationTableMapping> | undefined, b: DynamoDBDestinationTableMapping | PlainMessage<DynamoDBDestinationTableMapping> | undefined): boolean {
+    return proto3.util.equals(DynamoDBDestinationTableMapping, a, b);
   }
 }
 
@@ -2360,6 +2671,43 @@ export class MysqlSourceSchemaSubset extends Message<MysqlSourceSchemaSubset> {
 }
 
 /**
+ * @generated from message mgmt.v1alpha1.DynamoDBSourceSchemaSubset
+ */
+export class DynamoDBSourceSchemaSubset extends Message<DynamoDBSourceSchemaSubset> {
+  /**
+   * @generated from field: repeated mgmt.v1alpha1.DynamoDBSourceTableOption tables = 1;
+   */
+  tables: DynamoDBSourceTableOption[] = [];
+
+  constructor(data?: PartialMessage<DynamoDBSourceSchemaSubset>) {
+    super();
+    proto3.util.initPartial(data, this);
+  }
+
+  static readonly runtime: typeof proto3 = proto3;
+  static readonly typeName = "mgmt.v1alpha1.DynamoDBSourceSchemaSubset";
+  static readonly fields: FieldList = proto3.util.newFieldList(() => [
+    { no: 1, name: "tables", kind: "message", T: DynamoDBSourceTableOption, repeated: true },
+  ]);
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): DynamoDBSourceSchemaSubset {
+    return new DynamoDBSourceSchemaSubset().fromBinary(bytes, options);
+  }
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): DynamoDBSourceSchemaSubset {
+    return new DynamoDBSourceSchemaSubset().fromJson(jsonValue, options);
+  }
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): DynamoDBSourceSchemaSubset {
+    return new DynamoDBSourceSchemaSubset().fromJsonString(jsonString, options);
+  }
+
+  static equals(a: DynamoDBSourceSchemaSubset | PlainMessage<DynamoDBSourceSchemaSubset> | undefined, b: DynamoDBSourceSchemaSubset | PlainMessage<DynamoDBSourceSchemaSubset> | undefined): boolean {
+    return proto3.util.equals(DynamoDBSourceSchemaSubset, a, b);
+  }
+}
+
+/**
  * @generated from message mgmt.v1alpha1.JobSourceSqlSubetSchemas
  */
 export class JobSourceSqlSubetSchemas extends Message<JobSourceSqlSubetSchemas> {
@@ -2378,6 +2726,12 @@ export class JobSourceSqlSubetSchemas extends Message<JobSourceSqlSubetSchemas> 
      */
     value: MysqlSourceSchemaSubset;
     case: "mysqlSubset";
+  } | {
+    /**
+     * @generated from field: mgmt.v1alpha1.DynamoDBSourceSchemaSubset dynamodb_subset = 4;
+     */
+    value: DynamoDBSourceSchemaSubset;
+    case: "dynamodbSubset";
   } | { case: undefined; value?: undefined } = { case: undefined };
 
   constructor(data?: PartialMessage<JobSourceSqlSubetSchemas>) {
@@ -2390,6 +2744,7 @@ export class JobSourceSqlSubetSchemas extends Message<JobSourceSqlSubetSchemas> 
   static readonly fields: FieldList = proto3.util.newFieldList(() => [
     { no: 2, name: "postgres_subset", kind: "message", T: PostgresSourceSchemaSubset, oneof: "schemas" },
     { no: 3, name: "mysql_subset", kind: "message", T: MysqlSourceSchemaSubset, oneof: "schemas" },
+    { no: 4, name: "dynamodb_subset", kind: "message", T: DynamoDBSourceSchemaSubset, oneof: "schemas" },
   ]);
 
   static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): JobSourceSqlSubetSchemas {
@@ -2414,16 +2769,22 @@ export class JobSourceSqlSubetSchemas extends Message<JobSourceSqlSubetSchemas> 
  */
 export class SetJobSourceSqlConnectionSubsetsRequest extends Message<SetJobSourceSqlConnectionSubsetsRequest> {
   /**
+   * The unique identifier of the job to update subsets for
+   *
    * @generated from field: string id = 1;
    */
   id = "";
 
   /**
+   * The subset configuration
+   *
    * @generated from field: mgmt.v1alpha1.JobSourceSqlSubetSchemas schemas = 2;
    */
   schemas?: JobSourceSqlSubetSchemas;
 
   /**
+   * Whether or not to have subsets follow foreign key constraints (for connections that support it)
+   *
    * @generated from field: bool subset_by_foreign_key_constraints = 3;
    */
   subsetByForeignKeyConstraints = false;

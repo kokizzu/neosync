@@ -4,16 +4,21 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
+	"github.com/nucleuscloud/neosync/worker/pkg/rng"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
+
+// +neosyncTransformerBuilder:generate:generateCardNumber
 
 const defaultCCLength = 16
 const defaultIIN = 400000
 
 func init() {
 	spec := bloblang.NewPluginSpec().
-		Param(bloblang.NewBoolParam("valid_luhn"))
+		Description("Generates a card number.").
+		Param(bloblang.NewBoolParam("valid_luhn").Description("A boolean indicating whether the generated value should pass the Luhn algorithm check.")).
+		Param(bloblang.NewInt64Param("seed").Optional().Description("An optional seed value used to generate deterministic outputs."))
 
 	err := bloblang.RegisterFunctionV2("generate_card_number", spec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
 		luhn, err := args.GetBool("valid_luhn")
@@ -21,8 +26,20 @@ func init() {
 			return nil, err
 		}
 
+		seedArg, err := args.GetOptionalInt64("seed")
+		if err != nil {
+			return nil, err
+		}
+
+		seed, err := transformer_utils.GetSeedOrDefault(seedArg)
+		if err != nil {
+			return nil, err
+		}
+
+		randomizer := rng.New(seed)
+
 		return func() (any, error) {
-			res, err := generateCardNumber(luhn)
+			res, err := generateCardNumber(randomizer, luhn)
 			if err != nil {
 				return nil, fmt.Errorf("unable to run generate_card_number: %w", err)
 			}
@@ -35,19 +52,28 @@ func init() {
 	}
 }
 
+func (t *GenerateCardNumber) Generate(opts any) (any, error) {
+	parsedOpts, ok := opts.(*GenerateCardNumberOpts)
+	if !ok {
+		return nil, fmt.Errorf("invalid parsed opts: %T", opts)
+	}
+
+	return generateCardNumber(parsedOpts.randomizer, parsedOpts.validLuhn)
+}
+
 // Generates a 16 digit card number that can pass a luhn check if the validLuhn param is set to true. Otherwise will generate a random 16 digit card number.
-func generateCardNumber(luhn bool) (int64, error) {
+func generateCardNumber(randomizer rng.Rand, luhn bool) (int64, error) {
 	var returnValue int64
 
 	if luhn {
-		val, err := generateValidLuhnCheckCardNumber()
+		val, err := generateValidLuhnCheckCardNumber(randomizer)
 		if err != nil {
 			return 0, err
 		}
 
 		returnValue = val
 	} else {
-		val, err := transformer_utils.GenerateRandomInt64FixedLength(defaultCCLength)
+		val, err := transformer_utils.GenerateRandomInt64FixedLength(randomizer, defaultCCLength)
 		if err != nil {
 			return 0, err
 		}
@@ -59,7 +85,7 @@ func generateCardNumber(luhn bool) (int64, error) {
 }
 
 // generates a card number that passes luhn validation
-func generateValidLuhnCheckCardNumber() (int64, error) {
+func generateValidLuhnCheckCardNumber(randomizer rng.Rand) (int64, error) {
 	// To find the checksum digit on
 	cardNo := make([]int, 0)
 	for _, c := range fmt.Sprintf("%d", defaultIIN) {
@@ -73,7 +99,7 @@ func generateValidLuhnCheckCardNumber() (int64, error) {
 	}
 
 	// Acc no (9 digits)
-	nineDigits, err := transformer_utils.GenerateRandomInt64FixedLength(9)
+	nineDigits, err := transformer_utils.GenerateRandomInt64FixedLength(randomizer, 9)
 	if err != nil {
 		return 0, err
 	}

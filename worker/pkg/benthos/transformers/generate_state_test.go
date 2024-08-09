@@ -2,20 +2,22 @@ package transformers
 
 import (
 	"testing"
+	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	transformers_dataset "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/data-sets"
+	"github.com/nucleuscloud/neosync/worker/pkg/rng"
 	"github.com/stretchr/testify/assert"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
 
 func Test_GenerateState(t *testing.T) {
-	res := generateRandomState()
+	res := generateRandomState(rng.New(time.Now().UnixMilli()), false)
 
 	assert.IsType(t, "", res, "The returned state should be a string")
 
 	stateExists := false
-	for _, address := range transformers_dataset.Addresses {
-		if address.State == res {
+	for _, address := range transformers_dataset.States {
+		if address.Code == res {
 			stateExists = true
 			break
 		}
@@ -24,8 +26,42 @@ func Test_GenerateState(t *testing.T) {
 	assert.True(t, stateExists, "The generated state should exist in the addresses.go file")
 }
 
+func Test_GenerateStateCodeLength(t *testing.T) {
+	res := generateRandomState(rng.New(time.Now().UnixMilli()), false)
+
+	assert.IsType(t, "", res, "The returned state should be a string")
+
+	stateExists := false
+	for _, state := range transformers_dataset.States {
+		if state.Code == res {
+			stateExists = true
+			break
+		}
+	}
+
+	assert.Len(t, res, 2)
+	assert.True(t, stateExists, "The generated state should exist in the states.go file")
+}
+
+func Test_GenerateStateCodeFullName(t *testing.T) {
+	res := generateRandomState(rng.New(time.Now().UnixMilli()), true)
+
+	assert.IsType(t, "", res, "The returned state should be a string")
+
+	stateExists := false
+	for _, state := range transformers_dataset.States {
+		if state.FullName == res {
+			stateExists = true
+			break
+		}
+	}
+
+	assert.True(t, len(res) > 2)
+	assert.True(t, stateExists, "The generated state should exist in the states.go file")
+}
+
 func Test_StateTransformer(t *testing.T) {
-	mapping := `root = generate_state()`
+	mapping := `root = generate_state(generate_full_name:false)`
 	ex, err := bloblang.Parse(mapping)
 	assert.NoError(t, err, "failed to parse the state transformer")
 
@@ -35,12 +71,13 @@ func Test_StateTransformer(t *testing.T) {
 	assert.IsType(t, Address{}.City, res, "The returned state should be a string")
 
 	stateExists := false
-	for _, address := range transformers_dataset.Addresses {
-		if address.State == res {
+	for _, state := range transformers_dataset.States {
+		if state.Code == res {
 			stateExists = true
 			break
 		}
 	}
 
-	assert.True(t, stateExists, "The generated state should exist in the addresses.go file")
+	assert.Len(t, res, 2)
+	assert.True(t, stateExists, "The generated state should exist in the states.go file")
 }

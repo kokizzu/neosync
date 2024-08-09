@@ -15,6 +15,7 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/ai/azopenai"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/gofrs/uuid"
 	mgmtv1alpha1 "github.com/nucleuscloud/neosync/backend/gen/go/protos/mgmt/v1alpha1"
@@ -27,6 +28,7 @@ import (
 	sqlmanager_shared "github.com/nucleuscloud/neosync/backend/pkg/sqlmanager/shared"
 	querybuilder "github.com/nucleuscloud/neosync/worker/pkg/query-builder"
 	"go.mongodb.org/mongo-driver/bson"
+	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/types/known/structpb"
 )
 
@@ -392,6 +394,70 @@ func (s *Service) GetConnectionDataStream(
 	return nil
 }
 
+func (s *Service) GetConnectionSchemaMaps(
+	ctx context.Context,
+	req *connect.Request[mgmtv1alpha1.GetConnectionSchemaMapsRequest],
+) (*connect.Response[mgmtv1alpha1.GetConnectionSchemaMapsResponse], error) {
+	errgrp, errctx := errgroup.WithContext(ctx)
+	errgrp.SetLimit(3)
+
+	responses := make([]*mgmtv1alpha1.GetConnectionSchemaMapResponse, len(req.Msg.GetRequests()))
+	connectionIds := make([]string, len(req.Msg.GetRequests()))
+
+	for idx, mapReq := range req.Msg.GetRequests() {
+		idx := idx
+		mapReq := mapReq
+		connectionIds[idx] = mapReq.GetConnectionId()
+
+		errgrp.Go(func() error {
+			resp, err := s.GetConnectionSchemaMap(errctx, connect.NewRequest(mapReq))
+			if err != nil {
+				return err
+			}
+			responses[idx] = &mgmtv1alpha1.GetConnectionSchemaMapResponse{
+				SchemaMap: resp.Msg.GetSchemaMap(),
+			}
+			return nil
+		})
+	}
+
+	err := errgrp.Wait()
+	if err != nil {
+		return nil, err
+	}
+
+	return connect.NewResponse(&mgmtv1alpha1.GetConnectionSchemaMapsResponse{
+		Responses:     responses,
+		ConnectionIds: connectionIds,
+	}), nil
+}
+
+func (s *Service) GetConnectionSchemaMap(
+	ctx context.Context,
+	req *connect.Request[mgmtv1alpha1.GetConnectionSchemaMapRequest],
+) (*connect.Response[mgmtv1alpha1.GetConnectionSchemaMapResponse], error) {
+	schemaResp, err := s.GetConnectionSchema(ctx, connect.NewRequest(&mgmtv1alpha1.GetConnectionSchemaRequest{
+		ConnectionId: req.Msg.GetConnectionId(),
+		SchemaConfig: req.Msg.GetSchemaConfig(),
+	}))
+	if err != nil {
+		return nil, err
+	}
+	outputMap := map[string]*mgmtv1alpha1.GetConnectionSchemaResponse{}
+	for _, dbcol := range schemaResp.Msg.GetSchemas() {
+		schematableKey := sqlmanager_shared.SchemaTable{Schema: dbcol.Schema, Table: dbcol.Table}.String()
+		resp, ok := outputMap[schematableKey]
+		if !ok {
+			resp = &mgmtv1alpha1.GetConnectionSchemaResponse{}
+		}
+		resp.Schemas = append(resp.Schemas, dbcol)
+		outputMap[schematableKey] = resp
+	}
+	return connect.NewResponse(&mgmtv1alpha1.GetConnectionSchemaMapResponse{
+		SchemaMap: outputMap,
+	}), nil
+}
+
 func (s *Service) GetConnectionSchema(
 	ctx context.Context,
 	req *connect.Request[mgmtv1alpha1.GetConnectionSchemaRequest],
@@ -463,14 +529,14 @@ func (s *Service) GetConnectionSchema(
 		}
 		schemas := []*mgmtv1alpha1.DatabaseColumn{}
 		for _, dbname := range dbnames {
-			collNames, err := mongoclient.Database(dbname).ListCollectionNames(ctx, bson.D{})
+			collectionNames, err := mongoclient.Database(dbname).ListCollectionNames(ctx, bson.D{})
 			if err != nil {
 				return nil, err
 			}
-			for _, collName := range collNames {
+			for _, collectionName := range collectionNames {
 				schemas = append(schemas, &mgmtv1alpha1.DatabaseColumn{
 					Schema: dbname,
-					Table:  collName,
+					Table:  collectionName,
 				})
 			}
 		}
@@ -633,6 +699,25 @@ func (s *Service) GetConnectionSchema(
 		)
 		if err != nil {
 			return nil, fmt.Errorf("uanble to retrieve db schema from gcs: %w", err)
+		}
+		return connect.NewResponse(&mgmtv1alpha1.GetConnectionSchemaResponse{
+			Schemas: schemas,
+		}), nil
+	case *mgmtv1alpha1.ConnectionConfig_DynamodbConfig:
+		dynclient, err := s.awsManager.NewDynamoDbClient(ctx, config.DynamodbConfig)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create dynamodb client from connection: %w", err)
+		}
+		tableNames, err := dynclient.ListAllTables(ctx, &dynamodb.ListTablesInput{})
+		if err != nil {
+			return nil, fmt.Errorf("unable to retrieve dynamodb tables: %w", err)
+		}
+		schemas := []*mgmtv1alpha1.DatabaseColumn{}
+		for _, tableName := range tableNames {
+			schemas = append(schemas, &mgmtv1alpha1.DatabaseColumn{
+				Schema: "dynamodb",
+				Table:  tableName,
+			})
 		}
 		return connect.NewResponse(&mgmtv1alpha1.GetConnectionSchemaResponse{
 			Schemas: schemas,
@@ -808,17 +893,15 @@ func (s *Service) GetConnectionInitStatements(
 			createStmtsMap[k] = stmt
 			tables = append(tables, &sqlmanager_shared.SchemaTable{Schema: v.Schema, Table: v.Table})
 		}
-		if db.Driver == sqlmanager_shared.PostgresDriver {
-			initBlocks, err := db.Db.GetSchemaInitStatements(ctx, tables)
-			if err != nil {
-				return nil, err
-			}
-			for _, b := range initBlocks {
-				initSchemaStmts = append(initSchemaStmts, &mgmtv1alpha1.SchemaInitStatements{
-					Label:      b.Label,
-					Statements: b.Statements,
-				})
-			}
+		initBlocks, err := db.Db.GetSchemaInitStatements(ctx, tables)
+		if err != nil {
+			return nil, err
+		}
+		for _, b := range initBlocks {
+			initSchemaStmts = append(initSchemaStmts, &mgmtv1alpha1.SchemaInitStatements{
+				Label:      b.Label,
+				Statements: b.Statements,
+			})
 		}
 	}
 
@@ -909,6 +992,10 @@ func (s *Service) getConnectionSchema(ctx context.Context, connection *mgmtv1alp
 			Config: &mgmtv1alpha1.ConnectionSchemaConfig_MongoConfig{
 				MongoConfig: &mgmtv1alpha1.MongoSchemaConfig{},
 			},
+		}
+	case *mgmtv1alpha1.ConnectionConfig_DynamodbConfig:
+		schemaReq.SchemaConfig = &mgmtv1alpha1.ConnectionSchemaConfig{
+			Config: &mgmtv1alpha1.ConnectionSchemaConfig_DynamodbConfig{},
 		}
 	default:
 		return nil, nucleuserrors.NewNotImplemented("this connection config is not currently supported")
@@ -1352,19 +1439,24 @@ func (s *Service) GetTableRowCount(
 		return nil, err
 	}
 
-	connectionTimeout := 5
-	db, err := s.sqlmanager.NewSqlDb(ctx, logger, connection.Msg.GetConnection(), &connectionTimeout)
-	if err != nil {
-		return nil, err
-	}
-	defer db.Db.Close()
+	switch connection.Msg.GetConnection().GetConnectionConfig().Config.(type) {
+	case *mgmtv1alpha1.ConnectionConfig_PgConfig, *mgmtv1alpha1.ConnectionConfig_MysqlConfig:
+		connectionTimeout := 5
+		db, err := s.sqlmanager.NewSqlDb(ctx, logger, connection.Msg.GetConnection(), &connectionTimeout)
+		if err != nil {
+			return nil, err
+		}
+		defer db.Db.Close()
 
-	count, err := db.Db.GetTableRowCount(ctx, req.Msg.Schema, req.Msg.Table, req.Msg.WhereClause)
-	if err != nil {
-		return nil, err
-	}
+		count, err := db.Db.GetTableRowCount(ctx, req.Msg.Schema, req.Msg.Table, req.Msg.WhereClause)
+		if err != nil {
+			return nil, err
+		}
 
-	return connect.NewResponse(&mgmtv1alpha1.GetTableRowCountResponse{
-		Count: count,
-	}), nil
+		return connect.NewResponse(&mgmtv1alpha1.GetTableRowCountResponse{
+			Count: count,
+		}), nil
+	default:
+		return nil, fmt.Errorf("unsupported connection type when retrieving table row count %T", connection.Msg.GetConnection().GetConnectionConfig().Config)
+	}
 }

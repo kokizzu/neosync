@@ -9,22 +9,21 @@ import { useAccount } from '@/components/providers/account-provider';
 import { LayoutProps } from '@/components/types';
 import { Alert, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
-import { toast } from '@/components/ui/use-toast';
-import { useGetJob } from '@/libs/hooks/useGetJob';
-import { useGetJobRecentRuns } from '@/libs/hooks/useGetJobRecentRuns';
-import { useGetJobRunsByJob } from '@/libs/hooks/useGetJobRunsByJob';
-import { useGetJobStatus } from '@/libs/hooks/useGetJobStatus';
 import { useGetSystemAppConfig } from '@/libs/hooks/useGetSystemAppConfig';
 import { getErrorMessage } from '@/util/util';
+import { useMutation, useQuery } from '@connectrpc/connect-query';
+import { Job, JobSourceOptions, JobStatus } from '@neosync/sdk';
 import {
-  GetJobStatusResponse,
-  Job,
-  JobSourceOptions,
-  JobStatus,
-} from '@neosync/sdk';
+  createJobRun,
+  deleteJob,
+  getJob,
+  getJobRecentRuns,
+  getJobRuns,
+  getJobStatus,
+} from '@neosync/sdk/connectquery';
 import { LightningBoltIcon, TrashIcon } from '@radix-ui/react-icons';
 import { useRouter } from 'next/navigation';
-import { removeJob, triggerJobRun } from '../util';
+import { toast } from 'sonner';
 import JobIdSkeletonForm from './JobIdSkeletonForm';
 import JobCloneButton from './components/JobCloneButton';
 import JobPauseButton from './components/JobPauseButton';
@@ -34,40 +33,39 @@ export default function JobIdLayout({ children, params }: LayoutProps) {
   const id = params?.id ?? '';
   const router = useRouter();
   const { account } = useAccount();
-  const { data, isLoading } = useGetJob(account?.id ?? '', id);
-  const { data: jobStatus, mutate: mutateJobStatus } = useGetJobStatus(
-    account?.id ?? '',
-    id
+  const { data, isLoading } = useQuery(getJob, { id }, { enabled: !!id });
+  const { data: jobStatus, refetch: mutateJobStatus } = useQuery(
+    getJobStatus,
+    { jobId: id },
+    { enabled: !!id }
   );
-  const { mutate: mutateRecentRuns } = useGetJobRecentRuns(
-    account?.id ?? '',
-    id
+  const { refetch: mutateRecentRuns } = useQuery(
+    getJobRecentRuns,
+    { jobId: id },
+    { enabled: !!id }
   );
-  const { mutate: mutateJobRunsByJob } = useGetJobRunsByJob(
-    account?.id ?? '',
-    id
+  const { refetch: mutateJobRunsByJob } = useQuery(
+    getJobRuns,
+    { id: { case: 'jobId', value: id } },
+    { enabled: !!id }
   );
-
   const { data: systemAppConfigData, isLoading: isSystemConfigLoading } =
     useGetSystemAppConfig();
+  const { mutateAsync: removeJob } = useMutation(deleteJob);
+  const { mutateAsync: triggerJobRun } = useMutation(createJobRun);
 
   async function onTriggerJobRun(): Promise<void> {
     try {
-      await triggerJobRun(account?.id ?? '', id);
-      toast({
-        title: 'Job run triggered successfully!',
-        variant: 'success',
-      });
+      await triggerJobRun({ jobId: id });
+      toast.success('Job run triggered successfully!');
       setTimeout(() => {
         mutateRecentRuns();
         mutateJobRunsByJob();
       }, 4000); // delay briefly as there can sometimes be a trigger delay in temporal
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to trigger job run',
+      toast.error('Uanble to trigger job run', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
@@ -77,24 +75,19 @@ export default function JobIdLayout({ children, params }: LayoutProps) {
       return;
     }
     try {
-      await removeJob(account?.id ?? '', id);
-      toast({
-        title: 'Job removed successfully!',
-        variant: 'success',
-      });
+      await removeJob({ id });
+      toast.success('Job removed successfully!');
       router.push(`/${account?.name}/jobs`);
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to remove job',
+      toast.error('Unable to remove job', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
 
-  function onNewStatus(newStatus: JobStatus): void {
-    mutateJobStatus(new GetJobStatusResponse({ status: newStatus }));
+  function onNewStatus(_newStatus: JobStatus): void {
+    mutateJobStatus();
   }
 
   if (isLoading) {
@@ -270,6 +263,7 @@ function shouldEnableSubsettingNav(job?: Job): boolean {
   switch (job?.source?.options?.config.case) {
     case 'postgres':
     case 'mysql':
+    case 'dynamodb':
       return true;
     default:
       return false;

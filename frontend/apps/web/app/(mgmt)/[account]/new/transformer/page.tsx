@@ -11,6 +11,7 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from '@/components/ui/command';
 import {
   Form,
@@ -23,31 +24,36 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectTrigger } from '@/components/ui/select';
-import { toast } from '@/components/ui/use-toast';
-import { useGetSystemTransformers } from '@/libs/hooks/useGetSystemTransformers';
 import { cn } from '@/libs/utils';
 import { getErrorMessage } from '@/util/util';
 import {
   convertTransformerConfigSchemaToTransformerConfig,
   convertTransformerConfigToForm,
 } from '@/yup-validations/jobs';
+import { useMutation, useQuery } from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import {
-  CreateUserDefinedTransformerRequest,
-  CreateUserDefinedTransformerResponse,
+  GenerateBool,
   SystemTransformer,
   TransformerConfig,
   TransformerSource,
 } from '@neosync/sdk';
+import {
+  createUserDefinedTransformer,
+  getSystemTransformers,
+  isTransformerNameAvailable,
+  validateUserJavascriptCode,
+} from '@neosync/sdk/connectquery';
 import { CheckIcon } from '@radix-ui/react-icons';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { usePostHog } from 'posthog-js/react';
 import { ReactElement, useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { UserDefinedTransformerForm } from './UserDefinedTransformerForms/UserDefinedTransformerForm';
+import { toast } from 'sonner';
+import TransformerForm from './TransformerForms/TransformerForm';
 import {
-  CREATE_USER_DEFINED_TRANSFORMER_SCHEMA,
-  CreateUserDefinedTransformerSchema,
+  CreateUserDefinedTransformerFormContext,
+  CreateUserDefinedTransformerFormValues,
 } from './schema';
 
 function getTransformerSource(sourceStr: string): TransformerSource {
@@ -61,47 +67,70 @@ function getTransformerSource(sourceStr: string): TransformerSource {
 export default function NewTransformer(): ReactElement {
   const { account } = useAccount();
 
-  const { data, isLoading } = useGetSystemTransformers();
+  const { data, isLoading } = useQuery(getSystemTransformers);
   const transformers = data?.transformers ?? [];
 
   const transformerQueryParam = useSearchParams().get('transformer');
   const transformerSource = getTransformerSource(
     transformerQueryParam ?? TransformerSource.UNSPECIFIED.toString()
   );
+  const { mutateAsync: isTransformerNameAvailableAsync } = useMutation(
+    isTransformerNameAvailable
+  );
+  const { mutateAsync: isJavascriptCodeValid } = useMutation(
+    validateUserJavascriptCode
+  );
 
   const [openBaseSelect, setOpenBaseSelect] = useState(false);
   const posthog = usePostHog();
 
-  const form = useForm<CreateUserDefinedTransformerSchema>({
-    resolver: yupResolver(CREATE_USER_DEFINED_TRANSFORMER_SCHEMA),
+  const form = useForm<
+    CreateUserDefinedTransformerFormValues,
+    CreateUserDefinedTransformerFormContext
+  >({
+    resolver: yupResolver(CreateUserDefinedTransformerFormValues),
     mode: 'onChange',
     defaultValues: {
       name: '',
       source: transformerSource,
-      config: convertTransformerConfigToForm(new TransformerConfig()),
+      config: convertTransformerConfigToForm(
+        new TransformerConfig({
+          config: { case: 'generateBoolConfig', value: new GenerateBool() },
+        })
+      ),
       description: '',
     },
-    context: { accountId: account?.id ?? '' },
+    context: {
+      accountId: account?.id ?? '',
+      isTransformerNameAvailable: isTransformerNameAvailableAsync,
+      isUserJavascriptCodeValid: isJavascriptCodeValid,
+    },
   });
 
   const router = useRouter();
+  const { mutateAsync } = useMutation(createUserDefinedTransformer);
 
   async function onSubmit(
-    values: CreateUserDefinedTransformerSchema
+    values: CreateUserDefinedTransformerFormValues
   ): Promise<void> {
     if (!account) {
       return;
     }
     try {
-      const transformer = await createNewTransformer(account.id, values);
+      const transformer = await mutateAsync({
+        accountId: account.id,
+        name: values.name,
+        description: values.description,
+        source: values.source,
+        transformerConfig: convertTransformerConfigSchemaToTransformerConfig(
+          values.config
+        ),
+      });
       posthog.capture('New Transformer Created', {
         source: values.source,
         sourceName: transformers.find((t) => t.source === values.source)?.name,
       });
-      toast({
-        title: 'Successfully created transformer!',
-        variant: 'success',
-      });
+      toast.success('Successfully created transformer!');
       if (transformer.transformer?.id) {
         router.push(
           `/${account?.name}/transformers/${transformer.transformer?.id}`
@@ -111,10 +140,8 @@ export default function NewTransformer(): ReactElement {
       }
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to create transformer',
+      toast.error('Uanble to create transformer', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
@@ -167,33 +194,35 @@ export default function NewTransformer(): ReactElement {
                     <SelectContent>
                       <Command className="overflow-auto">
                         <CommandInput placeholder="Search transformers..." />
-                        <CommandEmpty>No transformers found.</CommandEmpty>
-                        <CommandGroup className="overflow-auto h-[200px]">
-                          {transformers.map((t) => (
-                            <CommandItem
-                              key={`${t.source}`}
-                              onSelect={() => {
-                                field.onChange(t.source);
-                                form.setValue(
-                                  'config',
-                                  convertTransformerConfigToForm(t.config)
-                                );
-                                setOpenBaseSelect(false);
-                              }}
-                              value={t.name}
-                            >
-                              <CheckIcon
-                                className={cn(
-                                  'mr-2 h-4 w-4',
-                                  base.name === t.name
-                                    ? 'opacity-100'
-                                    : 'opacity-0'
-                                )}
-                              />
-                              {t.name}
-                            </CommandItem>
-                          ))}
-                        </CommandGroup>
+                        <CommandList>
+                          <CommandEmpty>No transformers found.</CommandEmpty>
+                          <CommandGroup className="overflow-auto h-[200px]">
+                            {transformers.map((t) => (
+                              <CommandItem
+                                key={`${t.source}`}
+                                onSelect={() => {
+                                  field.onChange(t.source);
+                                  form.setValue(
+                                    'config',
+                                    convertTransformerConfigToForm(t.config)
+                                  );
+                                  setOpenBaseSelect(false);
+                                }}
+                                value={t.name}
+                              >
+                                <CheckIcon
+                                  className={cn(
+                                    'mr-2 h-4 w-4',
+                                    base.name === t.name
+                                      ? 'opacity-100'
+                                      : 'opacity-0'
+                                  )}
+                                />
+                                {t.name}
+                              </CommandItem>
+                            ))}
+                          </CommandGroup>
+                        </CommandList>
                       </Command>
                     </SelectContent>
                   </Select>
@@ -254,8 +283,27 @@ export default function NewTransformer(): ReactElement {
             </div>
           )}
           <div>
-            <UserDefinedTransformerForm
-              value={formSource ?? TransformerSource.UNSPECIFIED}
+            <FormField
+              control={form.control}
+              name="config"
+              render={({ field }) => (
+                <FormItem>
+                  <FormControl>
+                    <TransformerForm
+                      value={convertTransformerConfigSchemaToTransformerConfig(
+                        field.value
+                      )}
+                      setValue={(newValue) => {
+                        field.onChange(
+                          convertTransformerConfigToForm(newValue)
+                        );
+                      }}
+                      disabled={false}
+                      errors={form.formState.errors}
+                    />
+                  </FormControl>
+                </FormItem>
+              )}
             />
           </div>
           <div className="flex flex-row justify-end">
@@ -267,35 +315,4 @@ export default function NewTransformer(): ReactElement {
       </Form>
     </OverviewContainer>
   );
-}
-
-async function createNewTransformer(
-  accountId: string,
-  formData: CreateUserDefinedTransformerSchema
-): Promise<CreateUserDefinedTransformerResponse> {
-  const body = new CreateUserDefinedTransformerRequest({
-    accountId: accountId,
-    name: formData.name,
-    description: formData.description,
-    source: formData.source,
-    transformerConfig: convertTransformerConfigSchemaToTransformerConfig(
-      formData.config
-    ),
-  });
-
-  const res = await fetch(
-    `/api/accounts/${accountId}/transformers/user-defined`,
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return CreateUserDefinedTransformerResponse.fromJson(await res.json());
 }

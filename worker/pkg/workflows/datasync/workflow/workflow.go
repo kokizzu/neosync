@@ -3,7 +3,6 @@ package datasync_workflow
 import (
 	"fmt"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -105,7 +104,7 @@ func Workflow(wfctx workflow.Context, req *WorkflowRequest) (*WorkflowResponse, 
 		for _, redisCfg := range cfg.RedisConfig {
 			redisConfigs[redisCfg.Key] = redisCfg
 		}
-		redisDependsOn[neosync_benthos.BuildBenthosTable(cfg.TableSchema, cfg.TableName)] = cfg.RedisDependsOn
+		redisDependsOn[cfg.Name] = cfg.RedisDependsOn
 	}
 
 	workselector := workflow.NewSelector(ctx)
@@ -121,7 +120,6 @@ func Workflow(wfctx workflow.Context, req *WorkflowRequest) (*WorkflowResponse, 
 		logger := log.With(logger, withBenthosConfigResponseLoggerTags(bc)...)
 		future := invokeSync(bc, childctx, &started, &completed, logger)
 		workselector.AddFuture(future, func(f workflow.Future) {
-			logger.Info("config sync completed")
 			var result sync_activity.SyncResponse
 			err := f.Get(childctx, &result)
 			if err != nil {
@@ -134,7 +132,8 @@ func Workflow(wfctx workflow.Context, req *WorkflowRequest) (*WorkflowResponse, 
 				cancelHandler()
 				activityErr = err
 			}
-			delete(redisDependsOn, neosync_benthos.BuildBenthosTable(bc.TableSchema, bc.TableName))
+			logger.Info("config sync completed")
+			delete(redisDependsOn, bc.Name)
 			// clean up redis
 			err = runRedisCleanUpActivity(wfctx, logger, actOptResp, redisDependsOn, req.JobId, wfinfo.WorkflowExecution.ID, redisConfigs)
 			if err != nil {
@@ -182,7 +181,7 @@ func Workflow(wfctx workflow.Context, req *WorkflowRequest) (*WorkflowResponse, 
 					activityErr = err
 				}
 				logger.Info("config sync completed", "name", bc.Name)
-				delete(redisDependsOn, neosync_benthos.BuildBenthosTable(bc.TableSchema, bc.TableName))
+				delete(redisDependsOn, bc.Name)
 				// clean up redis
 				err = runRedisCleanUpActivity(wfctx, logger, actOptResp, redisDependsOn, req.JobId, wfinfo.WorkflowExecution.ID, redisConfigs)
 				if err != nil {
@@ -253,9 +252,7 @@ func withBenthosConfigResponseLoggerTags(bc *genbenthosconfigs_activity.BenthosC
 }
 
 func getSyncMetadata(config *genbenthosconfigs_activity.BenthosConfigResponse) *sync_activity.SyncMetadata {
-	names := strings.Split(config.Name, ".")
-	schema, table := names[0], names[1]
-	return &sync_activity.SyncMetadata{Schema: schema, Table: table}
+	return &sync_activity.SyncMetadata{Schema: config.TableSchema, Table: config.TableName}
 }
 
 func invokeSync(

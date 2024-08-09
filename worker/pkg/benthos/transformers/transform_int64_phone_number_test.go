@@ -5,16 +5,18 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
+	"github.com/nucleuscloud/neosync/worker/pkg/rng"
 	"github.com/stretchr/testify/assert"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
 
 var testValue = int64(8384928322)
 
 func Test_GenerateIntPhoneNumberPreserveLengthTrue(t *testing.T) {
-	res, err := TransformInt64PhoneNumber(testValue, true)
+	res, err := transformInt64PhoneNumber(rng.New(time.Now().UnixNano()), testValue, true)
 	assert.NoError(t, err)
 
 	numStr := strconv.FormatInt(*res, 10)
@@ -22,7 +24,7 @@ func Test_GenerateIntPhoneNumberPreserveLengthTrue(t *testing.T) {
 }
 
 func Test_GenerateIntPhoneNumberPreserveLengthFalse(t *testing.T) {
-	res, err := TransformInt64PhoneNumber(testValue, false)
+	res, err := transformInt64PhoneNumber(rng.New(time.Now().UnixNano()), testValue, false)
 	assert.NoError(t, err)
 
 	numStr := strconv.FormatInt(*res, 10)
@@ -30,7 +32,7 @@ func Test_GenerateIntPhoneNumberPreserveLengthFalse(t *testing.T) {
 }
 
 func Test_GenerateIntPhoneNumberPreserveLengthFunction(t *testing.T) {
-	res, err := GenerateIntPhoneNumberPreserveLength(testValue)
+	res, err := generateIntPhoneNumberPreserveLength(rng.New(time.Now().UnixNano()), testValue)
 	assert.NoError(t, err)
 
 	numStr := strconv.FormatInt(res, 10)

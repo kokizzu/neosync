@@ -3,22 +3,24 @@ package transformers
 import (
 	"fmt"
 	"testing"
+	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
+	"github.com/nucleuscloud/neosync/worker/pkg/rng"
 	"github.com/stretchr/testify/assert"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
 
 var testPhone = "1234567890"
 
 func Test_TransformStringPhoneNumber(t *testing.T) {
-	res, err := transformPhoneNumber(&testPhone, true, maxCharacterLimit)
+	res, err := transformPhoneNumber(rng.New(time.Now().UnixNano()), &testPhone, true, maxCharacterLimit)
 
 	assert.NoError(t, err)
 	assert.Equal(t, len(*res), len(testPhone), "The result should be the same length as the test phone")
 }
 
 func Test_TransformStringPhoneNumberEqualMinMax(t *testing.T) {
-	res, err := transformPhoneNumber(&testPhone, false, maxCharacterLimit)
+	res, err := transformPhoneNumber(rng.New(time.Now().UnixNano()), &testPhone, false, maxCharacterLimit)
 
 	assert.NoError(t, err)
 	assert.GreaterOrEqual(t, len(*res), 8, "Should be greater than 9 characters in length. 9 for the number and 1 for the plus sign.")

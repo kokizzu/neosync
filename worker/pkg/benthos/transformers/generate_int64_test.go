@@ -3,10 +3,12 @@ package transformers
 import (
 	"fmt"
 	"testing"
+	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
+	"github.com/nucleuscloud/neosync/worker/pkg/rng"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
 
 func Test_GenerateRandomInt(t *testing.T) {
@@ -26,7 +28,7 @@ func Test_GenerateRandomInt(t *testing.T) {
 
 	for _, tc := range testcases {
 		t.Run("", func(t *testing.T) {
-			output, err := generateRandomInt64(tc.randomizeSign, tc.min, tc.max)
+			output, err := generateRandomInt64(rng.New(time.Now().UnixNano()), tc.randomizeSign, tc.min, tc.max)
 			require.NoError(t, err)
 			require.GreaterOrEqual(t, output, tc.floor)
 			require.LessOrEqual(t, output, tc.ceil)
@@ -52,7 +54,7 @@ func Test_GenerateRandomInt_Randomized_Range(t *testing.T) {
 
 	for _, tc := range testcases {
 		t.Run("", func(t *testing.T) {
-			output, err := generateRandomInt64(true, tc.min, tc.max)
+			output, err := generateRandomInt64(rng.New(time.Now().UnixNano()), true, tc.min, tc.max)
 			require.NoError(t, err)
 			if output > 0 {
 				require.GreaterOrEqual(t, output, tc.positiveFloor)

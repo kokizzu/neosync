@@ -1,5 +1,6 @@
 'use client';
 
+import FormPersist from '@/app/(mgmt)/FormPersist';
 import OverviewContainer from '@/components/containers/OverviewContainer';
 import PageHeader from '@/components/headers/PageHeader';
 import SubsetOptionsForm from '@/components/jobs/Form/SubsetOptionsForm';
@@ -10,37 +11,48 @@ import {
   buildRowKey,
   buildTableRowData,
   GetColumnsForSqlAutocomplete,
+  isValidSubsetType,
 } from '@/components/jobs/subsets/utils';
-import { setOnboardingConfig } from '@/components/onboarding-checklist/OnboardingChecklist';
 import { useAccount } from '@/components/providers/account-provider';
 import { PageProps } from '@/components/types';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Form } from '@/components/ui/form';
 import { Separator } from '@/components/ui/separator';
-import { useToast } from '@/components/ui/use-toast';
-import { useGetAccountOnboardingConfig } from '@/libs/hooks/useGetAccountOnboardingConfig';
-import { useGetConnections } from '@/libs/hooks/useGetConnections';
-import { useGetConnectionTableConstraints } from '@/libs/hooks/useGetConnectionTableConstraints';
 import { getSingleOrUndefined } from '@/libs/utils';
 import { getErrorMessage } from '@/util/util';
 import { SchemaFormValues } from '@/yup-validations/jobs';
+import {
+  createConnectQueryKey,
+  useMutation,
+  useQuery,
+} from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import {
   ConnectionConfig,
   GetAccountOnboardingConfigResponse,
   JobMapping,
 } from '@neosync/sdk';
+import {
+  createJob,
+  getAccountOnboardingConfig,
+  getConnections,
+  getConnectionTableConstraints,
+  setAccountOnboardingConfig,
+} from '@neosync/sdk/connectquery';
 import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { usePostHog } from 'posthog-js/react';
 import { ReactElement, useEffect, useState } from 'react';
 import { useForm } from 'react-hook-form';
-import useFormPersist from 'react-hook-form-persist';
+import { toast } from 'sonner';
 import { useSessionStorage } from 'usehooks-ts';
+import { getConnectionType } from '../../../connections/util';
+import { showSubsetOptions } from '../../../jobs/[id]/subsets/components/SubsetCard';
 import {
   clearNewJobSession,
-  createNewSyncJob,
+  getCreateNewSyncJobRequest,
   getNewJobSessionKeys,
 } from '../../../jobs/util';
 import JobsProgressSteps, { getJobProgressSteps } from '../JobsProgressSteps';
@@ -54,18 +66,28 @@ export default function Page({ searchParams }: PageProps): ReactElement {
   const { account } = useAccount();
   const router = useRouter();
   const posthog = usePostHog();
-  const { data: onboardingData, mutate } = useGetAccountOnboardingConfig(
-    account?.id ?? ''
+  const { data: onboardingData } = useQuery(
+    getAccountOnboardingConfig,
+    { accountId: account?.id },
+    { enabled: !!account?.id }
   );
+  const queryclient = useQueryClient();
 
   useEffect(() => {
     if (!searchParams?.sessionId) {
       router.push(`/${account?.name}/new/job`);
     }
   }, [searchParams?.sessionId]);
-  const { toast } = useToast();
-  const { data: connectionsData } = useGetConnections(account?.id ?? '');
+  const { data: connectionsData } = useQuery(
+    getConnections,
+    { accountId: account?.id },
+    { enabled: !!account?.id }
+  );
   const connections = connectionsData?.connections ?? [];
+
+  const { mutateAsync: setOnboardingConfig } = useMutation(
+    setAccountOnboardingConfig
+  );
 
   const sessionPrefix = getSingleOrUndefined(searchParams?.sessionId) ?? '';
   const sessionKeys = getNewJobSessionKeys(sessionPrefix);
@@ -102,14 +124,18 @@ export default function Page({ searchParams }: PageProps): ReactElement {
     {
       mappings: [],
       connectionId: '',
+      destinationOptions: [],
     }
   );
 
-  const { data: tableConstraints, isValidating: isTableConstraintsValidating } =
-    useGetConnectionTableConstraints(
-      account?.id ?? '',
-      schemaFormValues.connectionId ?? ''
+  const { data: tableConstraints, isFetching: isTableConstraintsValidating } =
+    useQuery(
+      getConnectionTableConstraints,
+      { connectionId: schemaFormValues.connectionId },
+      { enabled: !!schemaFormValues.connectionId }
     );
+
+  const { mutateAsync: createNewSyncJob } = useMutation(createJob);
 
   const fkConstraints = tableConstraints?.foreignKeyConstraints;
   const [rootTables, setRootTables] = useState<Set<string>>(new Set());
@@ -130,20 +156,15 @@ export default function Page({ searchParams }: PageProps): ReactElement {
     defaultValues: subsetFormValues,
   });
 
-  const isBrowser = () => typeof window !== 'undefined';
-  useFormPersist(formKey, {
-    watch: form.watch,
-    setValue: form.setValue,
-    storage: isBrowser() ? window.sessionStorage : undefined,
-  });
-
   const [itemToEdit, setItemToEdit] = useState<TableRow | undefined>();
 
   const connection = connections.find(
     (item) => item.id == connectFormValues.sourceId
   );
 
-  const dbType = getDbtype(connection?.connectionConfig);
+  const connectionType = getConnectionType(
+    connection?.connectionConfig ?? new ConnectionConfig()
+  );
 
   async function onSubmit(values: SubsetFormValues): Promise<void> {
     if (!account) {
@@ -153,45 +174,49 @@ export default function Page({ searchParams }: PageProps): ReactElement {
     try {
       const connMap = new Map(connections.map((c) => [c.id, c]));
       const job = await createNewSyncJob(
-        {
-          define: defineFormValues,
-          connect: connectFormValues,
-          schema: schemaFormValues,
-          subset: values,
-        },
-        account.id,
-        (id) => connMap.get(id)
+        getCreateNewSyncJobRequest(
+          {
+            define: defineFormValues,
+            connect: connectFormValues,
+            schema: schemaFormValues,
+            subset: values,
+          },
+          account.id,
+          (id) => connMap.get(id)
+        )
       );
       posthog.capture('New Job Flow Complete', {
         jobType: 'data-sync',
       });
-      toast({
-        title: 'Successfully created the job!',
-        variant: 'success',
-      });
+      toast.success('Successfully created the job!');
       clearNewJobSession(window.sessionStorage, sessionPrefix);
 
       // updates the onboarding data
       if (!onboardingData?.config?.hasCreatedJob) {
         try {
-          const resp = await setOnboardingConfig(account.id, {
-            hasCreatedSourceConnection:
-              onboardingData?.config?.hasCreatedSourceConnection ?? true,
-            hasCreatedDestinationConnection:
-              onboardingData?.config?.hasCreatedDestinationConnection ?? true,
-            hasCreatedJob: true,
-            hasInvitedMembers:
-              onboardingData?.config?.hasInvitedMembers ?? true,
+          const resp = await setOnboardingConfig({
+            accountId: account.id,
+            config: {
+              hasCreatedSourceConnection:
+                onboardingData?.config?.hasCreatedSourceConnection ?? true,
+              hasCreatedDestinationConnection:
+                onboardingData?.config?.hasCreatedDestinationConnection ?? true,
+              hasCreatedJob: true,
+              hasInvitedMembers:
+                onboardingData?.config?.hasInvitedMembers ?? true,
+            },
           });
-          mutate(
+          queryclient.setQueryData(
+            createConnectQueryKey(getAccountOnboardingConfig, {
+              accountId: account.id,
+            }),
             new GetAccountOnboardingConfigResponse({
               config: resp.config,
             })
           );
         } catch (e) {
-          toast({
-            title: 'Unable to update onboarding status!',
-            variant: 'destructive',
+          toast.error('Unable to update onboarding status!', {
+            description: getErrorMessage(e),
           });
         }
       }
@@ -203,10 +228,8 @@ export default function Page({ searchParams }: PageProps): ReactElement {
       }
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to create job',
+      toast.error('Unable to create job', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
@@ -251,6 +274,7 @@ export default function Page({ searchParams }: PageProps): ReactElement {
 
   return (
     <div className="px-12 md:px-24 lg:px-32 flex flex-col gap-5">
+      <FormPersist formKey={formKey} form={form} />
       <OverviewContainer
         Header={
           <PageHeader
@@ -267,19 +291,19 @@ export default function Page({ searchParams }: PageProps): ReactElement {
       >
         <div />
       </OverviewContainer>
-      {dbType === 'invalid' && (
+      {!isValidSubsetType(connectionType) && (
         <Alert variant="warning">
           <ExclamationTriangleIcon className="h-4 w-4" />
           <AlertTitle>Heads up!</AlertTitle>
           <AlertDescription>
-            Subsetting is not currently enabled for NoSQL jobs. You may proceed
-            with the creation of this job while we continue to work on NoSQL
-            subsetting.
+            Subsetting is not currently enabled for this connection type. You
+            may proceed with the creation of this job while we continue to work
+            on subsetting for this connection.
           </AlertDescription>
         </Alert>
       )}
 
-      {dbType !== 'invalid' && (
+      {isValidSubsetType(connectionType) && (
         <div className="flex flex-col gap-4">
           <Form {...form}>
             <form
@@ -287,7 +311,9 @@ export default function Page({ searchParams }: PageProps): ReactElement {
               className="flex flex-col gap-8"
             >
               <div>
-                <SubsetOptionsForm maxColNum={2} />
+                {showSubsetOptions(connectionType) && (
+                  <SubsetOptionsForm maxColNum={2} />
+                )}
               </div>
               <div className="flex flex-col gap-2">
                 <div>
@@ -356,7 +382,7 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                       }
                       setItemToEdit(undefined);
                     }}
-                    dbType={dbType}
+                    connectionType={connectionType}
                   />
                 </div>
 
@@ -382,17 +408,4 @@ export default function Page({ searchParams }: PageProps): ReactElement {
       )}
     </div>
   );
-}
-
-function getDbtype(
-  options?: ConnectionConfig
-): 'mysql' | 'postgres' | 'invalid' {
-  switch (options?.config.case) {
-    case 'pgConfig':
-      return 'postgres';
-    case 'mysqlConfig':
-      return 'mysql';
-    default:
-      return 'invalid';
-  }
 }

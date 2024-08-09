@@ -4,7 +4,8 @@ import FormError from '@/components/FormError';
 import { PasswordInput } from '@/components/PasswordComponent';
 import Spinner from '@/components/Spinner';
 import RequiredLabel from '@/components/labels/RequiredLabel';
-import { setOnboardingConfig } from '@/components/onboarding-checklist/OnboardingChecklist';
+import { buildAccountOnboardingConfig } from '@/components/onboarding-checklist/OnboardingChecklist';
+import PermissionsDialog from '@/components/permissions/PermissionsDialog';
 import { useAccount } from '@/components/providers/account-provider';
 import SkeletonForm from '@/components/skeleton/SkeletonForm';
 import {
@@ -35,31 +36,39 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
-import { toast } from '@/components/ui/use-toast';
-import { useGetAccountOnboardingConfig } from '@/libs/hooks/useGetAccountOnboardingConfig';
-import { getConnection } from '@/libs/hooks/useGetConnection';
 import { getErrorMessage } from '@/util/util';
 import {
   MYSQL_CONNECTION_PROTOCOLS,
+  MysqlCreateConnectionFormContext,
   MysqlFormValues,
 } from '@/yup-validations/connections';
+import {
+  createConnectQueryKey,
+  useMutation,
+  useQuery,
+} from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import {
   CheckConnectionConfigResponse,
   GetAccountOnboardingConfigResponse,
+  GetConnectionResponse,
 } from '@neosync/sdk';
 import {
-  CheckCircledIcon,
-  ExclamationTriangleIcon,
-} from '@radix-ui/react-icons';
+  checkConnectionConfig,
+  createConnection,
+  getAccountOnboardingConfig,
+  getConnection,
+  isConnectionNameAvailable,
+  setAccountOnboardingConfig,
+} from '@neosync/sdk/connectquery';
+import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { usePostHog } from 'posthog-js/react';
 import { ReactElement, useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import {
-  checkMysqlConnection,
-  createMysqlConnection,
-} from '../../../connections/util';
+import { toast } from 'sonner';
+import { buildConnectionConfigMysql } from '../../../connections/util';
 
 type ActiveTab = 'host' | 'url';
 
@@ -68,14 +77,13 @@ export default function MysqlForm() {
   const searchParams = useSearchParams();
   const sourceConnId = searchParams.get('sourceId');
   const [isLoading, setIsLoading] = useState<boolean>();
-  const { data: onboardingData, mutate } = useGetAccountOnboardingConfig(
-    account?.id ?? ''
-  );
 
   // used to know which tab - host or url that the user is on when we submit the form
   const [activeTab, setActiveTab] = useState<ActiveTab>('url');
-
-  const form = useForm<MysqlFormValues>({
+  const { mutateAsync: isConnectionNameAvailableAsync } = useMutation(
+    isConnectionNameAvailable
+  );
+  const form = useForm<MysqlFormValues, MysqlCreateConnectionFormContext>({
     resolver: yupResolver(MysqlFormValues),
     defaultValues: {
       connectionName: '',
@@ -100,7 +108,11 @@ export default function MysqlForm() {
         privateKey: '',
       },
     },
-    context: { accountId: account?.id ?? '', activeTab: activeTab },
+    context: {
+      accountId: account?.id ?? '',
+      activeTab: activeTab,
+      isConnectionNameAvailable: isConnectionNameAvailableAsync,
+    },
   });
   const router = useRouter();
   const [validationResponse, setValidationResponse] = useState<
@@ -108,67 +120,91 @@ export default function MysqlForm() {
   >();
 
   const [isValidating, setIsValidating] = useState<boolean>(false);
+  const [openPermissionDialog, setOpenPermissionDialog] =
+    useState<boolean>(false);
   const posthog = usePostHog();
+  const { mutateAsync: createMysqlConnection } = useMutation(createConnection);
+  const { mutateAsync: checkMysqlConnection } = useMutation(
+    checkConnectionConfig
+  );
+  const { mutateAsync: getMysqlConnection } = useMutation(getConnection);
+  const { data: onboardingData } = useQuery(
+    getAccountOnboardingConfig,
+    { accountId: account?.id ?? '' },
+    { enabled: !!account?.id }
+  );
+  const queryclient = useQueryClient();
+  const { mutateAsync: setOnboardingConfigAsync } = useMutation(
+    setAccountOnboardingConfig
+  );
 
   async function onSubmit(values: MysqlFormValues) {
     if (!account) {
       return;
     }
     try {
-      const connection = await createMysqlConnection(
-        {
+      const connection = await createMysqlConnection({
+        name: values.connectionName,
+        accountId: account.id,
+        connectionConfig: buildConnectionConfigMysql({
           ...values,
           url: activeTab === 'url' ? values.url : undefined,
           db: values.db,
-        },
-        account.id
-      );
-      posthog.capture('New Connection Created', { type: 'mysql' });
-      toast({
-        title: 'Successfully created connection!',
-        variant: 'success',
+        }),
       });
+      posthog.capture('New Connection Created', { type: 'mysql' });
+      toast.success('Successfully created connection!');
 
       // updates the onboarding data
       if (onboardingData?.config?.hasCreatedSourceConnection) {
         try {
-          const resp = await setOnboardingConfig(account.id, {
-            hasCreatedSourceConnection:
-              onboardingData.config.hasCreatedSourceConnection,
-            hasCreatedDestinationConnection: true,
-            hasCreatedJob: onboardingData.config.hasCreatedJob,
-            hasInvitedMembers: onboardingData.config.hasInvitedMembers,
+          const resp = await setOnboardingConfigAsync({
+            accountId: account.id,
+            config: buildAccountOnboardingConfig({
+              hasCreatedSourceConnection:
+                onboardingData.config.hasCreatedSourceConnection,
+              hasCreatedDestinationConnection: true,
+              hasCreatedJob: onboardingData.config.hasCreatedJob,
+              hasInvitedMembers: onboardingData.config.hasInvitedMembers,
+            }),
           });
-          mutate(
+          queryclient.setQueryData(
+            createConnectQueryKey(getAccountOnboardingConfig, {
+              accountId: account.id,
+            }),
             new GetAccountOnboardingConfigResponse({
               config: resp.config,
             })
           );
         } catch (e) {
-          toast({
-            title: 'Unable to update onboarding status!',
-            variant: 'destructive',
+          toast.error('Unable to update onboarding status!', {
+            description: getErrorMessage(e),
           });
         }
       } else {
         try {
-          const resp = await setOnboardingConfig(account.id, {
-            hasCreatedSourceConnection: true,
-            hasCreatedDestinationConnection:
-              onboardingData?.config?.hasCreatedSourceConnection ?? true,
-            hasCreatedJob: onboardingData?.config?.hasCreatedJob ?? true,
-            hasInvitedMembers:
-              onboardingData?.config?.hasInvitedMembers ?? true,
+          const resp = await setOnboardingConfigAsync({
+            accountId: account.id,
+            config: buildAccountOnboardingConfig({
+              hasCreatedSourceConnection: true,
+              hasCreatedDestinationConnection:
+                onboardingData?.config?.hasCreatedSourceConnection ?? true,
+              hasCreatedJob: onboardingData?.config?.hasCreatedJob ?? true,
+              hasInvitedMembers:
+                onboardingData?.config?.hasInvitedMembers ?? true,
+            }),
           });
-          mutate(
+          queryclient.setQueryData(
+            createConnectQueryKey(getAccountOnboardingConfig, {
+              accountId: account.id,
+            }),
             new GetAccountOnboardingConfigResponse({
               config: resp.config,
             })
           );
         } catch (e) {
-          toast({
-            title: 'Unable to update onboarding status!',
-            variant: 'destructive',
+          toast.error('Unable to update onboarding status!', {
+            description: getErrorMessage(e),
           });
         }
       }
@@ -177,6 +213,14 @@ export default function MysqlForm() {
       if (returnTo) {
         router.push(returnTo);
       } else if (connection.connection?.id) {
+        queryclient.setQueryData(
+          createConnectQueryKey(getConnection, {
+            id: connection.connection.id,
+          }),
+          new GetConnectionResponse({
+            connection: connection.connection,
+          })
+        );
         router.push(
           `/${account?.name}/connections/${connection.connection.id}`
         );
@@ -185,10 +229,8 @@ export default function MysqlForm() {
       }
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to create connection',
+      toast.error('Unable to create connection', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
@@ -203,7 +245,7 @@ the hook in the useEffect conditionally. This is used to retrieve the values for
       setIsLoading(true);
 
       try {
-        const connData = await getConnection(account.id, sourceConnId);
+        const connData = await getMysqlConnection({ id: sourceConnId });
         if (
           connData.connection?.connectionConfig?.config.case !== 'mysqlConfig'
         ) {
@@ -252,6 +294,10 @@ the hook in the useEffect conditionally. This is used to retrieve the values for
           connectionName: connData.connection?.name + '-copy',
           db: dbConfig,
           url: typeof mysqlConfig === 'string' ? mysqlConfig : '',
+          options: {
+            maxConnectionLimit:
+              config.connectionOptions?.maxConnectionLimit ?? 80,
+          },
           tunnel: {
             host: config.tunnel?.host ?? '',
             port: config.tunnel?.port ?? 22,
@@ -269,10 +315,8 @@ the hook in the useEffect conditionally. This is used to retrieve the values for
       } catch (error) {
         console.error('Failed to fetch connection data:', error);
         setIsLoading(false);
-        toast({
-          title: 'Unable to retrieve connection data for clone!',
+        toast.error('Unable to retrieve connection data from clone!', {
           description: getErrorMessage(error),
-          variant: 'destructive',
         });
       } finally {
         setIsLoading(false);
@@ -649,19 +693,33 @@ the hook in the useEffect conditionally. This is used to retrieve the values for
             </AccordionContent>
           </AccordionItem>
         </Accordion>
+        <PermissionsDialog
+          checkResponse={
+            validationResponse ?? new CheckConnectionConfigResponse({})
+          }
+          openPermissionDialog={openPermissionDialog}
+          setOpenPermissionDialog={setOpenPermissionDialog}
+          isValidating={isValidating}
+          connectionName={form.getValues('connectionName')}
+          connectionType="mysql"
+        />
         <div className="flex flex-row gap-3 justify-between">
           <Button
             variant="outline"
             disabled={!form.formState.isValid}
             onClick={async () => {
               setIsValidating(true);
+              const values = form.getValues();
               try {
-                const res = await checkMysqlConnection(
-                  form.getValues(),
-                  account?.id ?? ''
-                );
-                setIsValidating(false);
+                const res = await checkMysqlConnection({
+                  connectionConfig: buildConnectionConfigMysql({
+                    ...values,
+                    url: activeTab === 'url' ? values.url : undefined,
+                    db: values.db,
+                  }),
+                });
                 setValidationResponse(res);
+                setOpenPermissionDialog(!!res?.isConnected);
               } catch (err) {
                 setValidationResponse(
                   new CheckConnectionConfigResponse({
@@ -703,29 +761,8 @@ the hook in the useEffect conditionally. This is used to retrieve the values for
             }
           />
         )}
-        {validationResponse && validationResponse.isConnected && (
-          <SuccessAlert description={'Successfully connected!'} />
-        )}
       </form>
     </Form>
-  );
-}
-
-interface SuccessAlertProps {
-  description: string;
-}
-
-function SuccessAlert(props: SuccessAlertProps): ReactElement {
-  const { description } = props;
-  return (
-    <Alert variant="success">
-      <div className="flex flex-row items-center gap-2">
-        <CheckCircledIcon className="h-4 w-4 text-green-900 dark:text-green-400" />
-        <div className="font-normal text-green-900 dark:text-green-400">
-          {description}
-        </div>
-      </div>
-    </Alert>
   );
 }
 

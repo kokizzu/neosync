@@ -1,18 +1,24 @@
 package transformers
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
+	"github.com/nucleuscloud/neosync/worker/pkg/rng"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
+
+// +neosyncTransformerBuilder:transform:transformString
 
 func init() {
 	spec := bloblang.NewPluginSpec().
+		Description("Transforms an existing string value.").
 		Param(bloblang.NewAnyParam("value").Optional()).
-		Param(bloblang.NewBoolParam("preserve_length")).
-		Param(bloblang.NewInt64Param("min_length")).
-		Param(bloblang.NewInt64Param("max_length"))
+		Param(bloblang.NewBoolParam("preserve_length").Default(false).Description("Whether the original length of the input data should be preserved during transformation. If set to true, the transformation logic will ensure that the output data has the same length as the input data.")).
+		Param(bloblang.NewInt64Param("min_length").Default(1).Description("Specifies the minimum length of the transformed value.")).
+		Param(bloblang.NewInt64Param("max_length").Default(20).Description("Specifies the maximum length of the transformed value.")).
+		Param(bloblang.NewInt64Param("seed").Optional().Description("An optional seed value used to generate deterministic outputs."))
 
 	err := bloblang.RegisterFunctionV2("transform_string", spec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
 		value, err := args.GetOptionalString("value")
@@ -35,8 +41,20 @@ func init() {
 			return nil, err
 		}
 
+		seedArg, err := args.GetOptionalInt64("seed")
+		if err != nil {
+			return nil, err
+		}
+
+		seed, err := transformer_utils.GetSeedOrDefault(seedArg)
+		if err != nil {
+			return nil, err
+		}
+
+		randomizer := rng.New(seed)
+
 		return func() (any, error) {
-			res, err := transformString(value, preserveLength, minLength, maxLength)
+			res, err := transformString(randomizer, value, preserveLength, minLength, maxLength)
 			if err != nil {
 				return nil, fmt.Errorf("unable to run transform_string: %w", err)
 			}
@@ -49,8 +67,22 @@ func init() {
 	}
 }
 
+func (t *TransformString) Transform(value, opts any) (any, error) {
+	parsedOpts, ok := opts.(*TransformStringOpts)
+	if !ok {
+		return nil, fmt.Errorf("invalid parsed opts: %T", opts)
+	}
+
+	valueStr, ok := value.(string)
+	if !ok {
+		return nil, errors.New("value is not a string")
+	}
+
+	return transformString(parsedOpts.randomizer, &valueStr, parsedOpts.preserveLength, parsedOpts.minLength, parsedOpts.maxLength)
+}
+
 // Transforms an existing string value into another string. Does not account for numbers and other characters. If you want to preserve spaces, capitalization and other characters, use the Transform_Characters transformer.
-func transformString(value *string, preserveLength bool, minLength, maxLength int64) (*string, error) {
+func transformString(randomizer rng.Rand, value *string, preserveLength bool, minLength, maxLength int64) (*string, error) {
 	if value == nil {
 		return nil, nil
 	}
@@ -67,7 +99,7 @@ func transformString(value *string, preserveLength bool, minLength, maxLength in
 		minL = valueLength
 		maxL = valueLength
 	}
-	val, err := transformer_utils.GenerateRandomStringWithInclusiveBounds(minL, maxL)
+	val, err := transformer_utils.GenerateRandomStringWithInclusiveBounds(randomizer, minL, maxL)
 	if err != nil {
 		return nil, fmt.Errorf("unable to transform a random string with length: [%d:%d]: %w", minL, maxL, err)
 	}

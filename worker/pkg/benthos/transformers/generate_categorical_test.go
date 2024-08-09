@@ -4,15 +4,17 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
+	"github.com/nucleuscloud/neosync/worker/pkg/rng"
 	"github.com/stretchr/testify/assert"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
 
 func Test_GenerateCategorical(t *testing.T) {
 	categories := []string{"test", "me", "please", "sir"}
 
-	res := generateCategorical(categories)
+	res := generateCategorical(rng.New(time.Now().UnixNano()), categories)
 
 	valueInCategory := false
 	for _, cat := range categories {

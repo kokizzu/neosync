@@ -1,4 +1,5 @@
 'use client';
+import FormPersist from '@/app/(mgmt)/FormPersist';
 import { getConnectionType } from '@/app/(mgmt)/[account]/connections/util';
 import { getNewJobSessionKeys } from '@/app/(mgmt)/[account]/jobs/util';
 import OverviewContainer from '@/components/containers/OverviewContainer';
@@ -22,15 +23,15 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useGetConnections } from '@/libs/hooks/useGetConnections';
 import { getSingleOrUndefined, splitConnections } from '@/libs/utils';
+import { useQuery } from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import { ConnectionConfig } from '@neosync/sdk';
+import { getConnections } from '@neosync/sdk/connectquery';
 import { useRouter } from 'next/navigation';
 import { usePostHog } from 'posthog-js/react';
 import { ReactElement, useEffect } from 'react';
 import { Control, useForm, useWatch } from 'react-hook-form';
-import useFormPersist from 'react-hook-form-persist';
 import { useSessionStorage } from 'usehooks-ts';
 import JobsProgressSteps, {
   getJobProgressSteps,
@@ -71,14 +72,11 @@ export default function Page({ searchParams }: PageProps): ReactElement {
     defaultValues,
   });
 
-  useFormPersist(formKey, {
-    watch: form.watch,
-    setValue: form.setValue,
-    storage: window.sessionStorage,
-  });
-  const { isLoading: isConnectionsLoading, data: connectionsData } =
-    useGetConnections(account?.id ?? '');
-
+  const { isLoading: isConnectionsLoading, data: connectionsData } = useQuery(
+    getConnections,
+    { accountId: account?.id },
+    { enabled: !!account?.id }
+  );
   const connections = connectionsData?.connections ?? [];
 
   async function onSubmit(_values: SingleTableConnectFormValues) {
@@ -101,6 +99,7 @@ export default function Page({ searchParams }: PageProps): ReactElement {
       id="newjobflowcontainer"
       className="px-12 md:px-24 lg:px-32 flex flex-col gap-5"
     >
+      <FormPersist formKey={formKey} form={form} />
       <OverviewContainer
         Header={
           <PageHeader
@@ -169,8 +168,11 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                               if (
                                 urlParams.getAll('connectionType').length === 0
                               ) {
-                                urlParams.append('connectionType', 'postgres');
-                                urlParams.append('connectionType', 'mysql');
+                                urlParams.append('connectionType', 'pgConfig');
+                                urlParams.append(
+                                  'connectionType',
+                                  'mysqlConfig'
+                                );
                               }
                               router.push(
                                 `/${account?.name}/new/connection?${urlParams.toString()}`
@@ -239,20 +241,15 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                               const urlParams = new URLSearchParams({
                                 returnTo: `/${account?.name}/new/job/generate/single/connect?sessionId=${sessionPrefix}&from=new-connection`,
                               });
-                              urlParams.append('connectionType', 'postgres');
-                              urlParams.append('connectionType', 'mysql');
+                              urlParams.append('connectionType', 'pgConfig');
+                              urlParams.append('connectionType', 'mysqlConfig');
                               router.push(
                                 `/${account?.name}/new/connection?${urlParams.toString()}`
                               );
                               return;
                             }
                             field.onChange(value);
-                            form.setValue('destination.destinationOptions', {
-                              initTableSchema: false,
-                              truncateBeforeInsert: false,
-                              truncateCascade: false,
-                              onConflictDoNothing: false,
-                            });
+                            form.setValue('destination.destinationOptions', {});
                           }}
                           value={field.value}
                         >
@@ -279,28 +276,16 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                   (c) => c.id === form.getValues().destination.connectionId
                 )}
                 hideInitTableSchema={shouldHideInitTableSchema}
-                value={{
-                  initTableSchema: destOpts.initTableSchema ?? false,
-                  onConflictDoNothing: destOpts.onConflictDoNothing ?? false,
-                  truncateBeforeInsert: destOpts.truncateBeforeInsert ?? false,
-                  truncateCascade: destOpts.truncateCascade ?? false,
-                }}
+                value={destOpts}
                 setValue={(newOpts) => {
-                  form.setValue(
-                    'destination.destinationOptions',
-                    {
-                      initTableSchema: newOpts.initTableSchema,
-                      onConflictDoNothing: newOpts.onConflictDoNothing,
-                      truncateBeforeInsert: newOpts.truncateBeforeInsert,
-                      truncateCascade: newOpts.truncateCascade,
-                    },
-                    {
-                      shouldDirty: true,
-                      shouldTouch: true,
-                      shouldValidate: true,
-                    }
-                  );
+                  form.setValue('destination.destinationOptions', newOpts, {
+                    shouldDirty: true,
+                    shouldTouch: true,
+                    shouldValidate: true,
+                  });
                 }}
+                hideDynamoDbTableMappings={true}
+                destinationDetailsRecord={{}} // not used because we are hiding dynamodb table mappings
               />
             </div>
           </div>

@@ -1,19 +1,23 @@
 package transformers
 
 import (
+	"errors"
 	"fmt"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
 	"github.com/nucleuscloud/neosync/worker/pkg/rng"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
+
+// +neosyncTransformerBuilder:transform:transformFirstName
 
 func init() {
 	spec := bloblang.NewPluginSpec().
-		Param(bloblang.NewInt64Param("max_length").Default(10000)).
+		Description("Transforms an existing first name").
+		Param(bloblang.NewInt64Param("max_length").Default(10000).Description("Specifies the maximum length for the transformed data. This field ensures that the output does not exceed a certain number of characters.")).
 		Param(bloblang.NewAnyParam("value").Optional()).
-		Param(bloblang.NewBoolParam("preserve_length").Default(false)).
-		Param(bloblang.NewInt64Param("seed").Optional())
+		Param(bloblang.NewBoolParam("preserve_length").Default(false).Description("Whether the original length of the input data should be preserved during transformation. If set to true, the transformation logic will ensure that the output data has the same length as the input data.")).
+		Param(bloblang.NewInt64Param("seed").Optional().Description("An optional seed value used for generating deterministic transformations."))
 
 	err := bloblang.RegisterFunctionV2("transform_first_name", spec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
 		valuePtr, err := args.GetOptionalString("value")
@@ -40,16 +44,10 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		var seed int64
-		if seedArg != nil {
-			seed = *seedArg
-		} else {
-			// we want a bit more randomness here with generate_email so using something that isn't time based
-			var err error
-			seed, err = transformer_utils.GenerateCryptoSeed()
-			if err != nil {
-				return nil, err
-			}
+
+		seed, err := transformer_utils.GetSeedOrDefault(seedArg)
+		if err != nil {
+			return nil, err
 		}
 
 		randomizer := rng.New(seed)
@@ -68,9 +66,23 @@ func init() {
 	}
 }
 
+func (t *TransformFirstName) Transform(value, opts any) (any, error) {
+	parsedOpts, ok := opts.(*TransformFirstNameOpts)
+	if !ok {
+		return nil, fmt.Errorf("invalid parsed opts: %T", opts)
+	}
+
+	valueStr, ok := value.(string)
+	if !ok {
+		return nil, errors.New("value is not a string")
+	}
+
+	return transformFirstName(parsedOpts.randomizer, valueStr, parsedOpts.preserveLength, parsedOpts.maxLength)
+}
+
 // Generates a random first name which can be of either random length or as long as the input name
-func transformFirstName(randomizer rng.Rand, name string, preserveLength bool, maxLength int64) (*string, error) {
-	if name == "" {
+func transformFirstName(randomizer rng.Rand, value string, preserveLength bool, maxLength int64) (*string, error) {
+	if value == "" {
 		return nil, nil
 	}
 
@@ -80,7 +92,7 @@ func transformFirstName(randomizer rng.Rand, name string, preserveLength bool, m
 	// we may want to change this to just use the below algorithm and pad so that it is more unique
 	// as with this algorithm, it will only ever use values from the underlying map that are that specific size
 	if preserveLength {
-		maxValue = int64(len(name))
+		maxValue = int64(len(value))
 		output, err := generateRandomFirstName(randomizer, &maxValue, maxValue)
 		if err == nil {
 			return &output, nil

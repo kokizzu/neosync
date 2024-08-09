@@ -43,6 +43,7 @@ A Helm chart for Neosync that contains the api, app, and worker
 | api.db.password | string | `nil` | The username's password for authentication |
 | api.db.port | int | `5432` | The database port |
 | api.db.username | string | `nil` | The username that will be used for authentication |
+| api.deploymentAnnotations | object | `{}` | Provide a map of deployment annotations that will be attached to the deployment's annotations |
 | api.extraEnvVars | list | `[]` | Provide extra environment variables that will be applied to the deployment. |
 | api.fullnameOverride | string | `nil` | Fully overrides the chart name |
 | api.host | string | `"0.0.0.0"` | Sets the host that the backend will listen on. 0.0.0.0 is common for Kubernetes workloads. |
@@ -72,6 +73,7 @@ A Helm chart for Neosync that contains the api, app, and worker
 | api.nucleusEnv | string | `nil` | Mostly used by NeosyncCloud. Adds a special tag to the logging to determine what environment is running |
 | api.otel.enabled | bool | `false` | whether or not to enable open telemetry settings |
 | api.otel.otlpPort | int | `4317` | Specifies the port that otel is listening on that the service will export metrics and traces to |
+| api.podAnnotations | object | `{}` | Provide a map of pod annotations that will be attached to the deployment's pod template annotations |
 | api.protometrics.apiKey | string | `nil` | Optionally provide an API key if the prometheus service requires authentication |
 | api.protometrics.enabled | bool | `false` | Will enable the metrics service proto |
 | api.protometrics.url | string | `nil` | The url, will default to http://localhost:9090 if not provided. Should be a prometheus compliant API |
@@ -91,6 +93,7 @@ A Helm chart for Neosync that contains the api, app, and worker
 | api.serviceAccount.name | string | `nil` | The name of the service account to use. If namenot set and create is true, a name is generated using fullname template |
 | api.servicePort | int | `80` | The K8s service port |
 | api.shutdownTimeoutSeconds | string | `nil` | Not currently used |
+| api.sidecarContainers | list | `[]` | Provide sidecars that will be appended directly to the deployment next to the user-container |
 | api.temporal.certificate.certContents | string | `nil` | The full contents of the certificate. Provide this or the certFilePath, not both. |
 | api.temporal.certificate.certFilePath | string | `nil` | The location of the certificate file |
 | api.temporal.certificate.keyContents | string | `nil` | The full contents of the key. Provide this or the keyFilePath, not both. |
@@ -112,8 +115,10 @@ A Helm chart for Neosync that contains the api, app, and worker
 | app.auth.providerId | string | `nil` | The ID of the provider for your OIDC client. This can be anything |
 | app.auth.providerName | string | `nil` | The display name of the provider |
 | app.auth.scope | string | `nil` | The scopes that should be requested. Standard are "openid email profile offline_access" |
+| app.auth.trustHost | bool | `true` | Whether or not to trust the external host (most likely want this to be true if running behind a load balancer) |
 | app.containerPort | int | `3000` | The container port |
 | app.datadog.enabled | bool | `false` | Whether or not to apply the default Datadog annotations/labels to the deployment |
+| app.deploymentAnnotations | object | `{}` | Provide a map of deployment annotations that will be attached to the deployment's annotations |
 | app.disableGcpCloudStorageConnections | bool | `false` | Feature flag that will disable GCP Cloud Storage Connections from being visible. Note: This only disables the new connections form and is a temporary flag until authentication in the multi-tenant environment is better understood. |
 | app.enableRunLogs | bool | `false` | Feature flag that enables the frontend to show the run logs on the Run [id] page. only enable this if the backend has been configured to surface run logs |
 | app.extraEnvVars | list | `[]` | Provide extra environment variables that will be applied to the deployment. |
@@ -136,13 +141,19 @@ A Helm chart for Neosync that contains the api, app, and worker
 | app.nucleusEnv | string | `nil` | Mostly used by NeosyncCloud. Adds a special tag to the logging to determine what environment is running |
 | app.otel.enabled | bool | `false` | whether or not to enable open telemetry settings |
 | app.otel.otlpPort | int | `4317` | Specifies the port that otel is listening on that the service will export metrics and traces to |
+| app.podAnnotations | object | `{}` | Provide a map of pod annotations that will be attached to the deployment's pod template annotations |
 | app.posthog.key | string | `"phc_qju45RhNvCDwYVdRyUjtWuWsOmLFaQZi3fmztMBaJip"` | Posthog Key |
 | app.protometrics.enabled | bool | `false` |  |
+| app.resources.limits.cpu | string | `"500m"` | Sets the max CPU amount |
+| app.resources.limits.memory | string | `"512Mi"` | Sets the max Memory amount |
+| app.resources.requests.cpu | string | `"100m"` | Sets the CPU amount to be requested |
+| app.resources.requests.memory | string | `"128Mi"` | Sets the Memory amount to be requested |
 | app.serviceAccount.annotations | object | `{}` | Specify annotations here that will be attached to the service account. Useful for specifying role information or other tagging depending on environment. |
 | app.serviceAccount.create | bool | `true` | Specifies whether a service account should be created |
 | app.serviceAccount.name | string | `nil` | The name of the service account to use. If namenot set and create is true, a name is generated using fullname template |
 | app.servicePort | int | `80` | The K8s service port |
 | app.shutdownTimeoutSeconds | string | `nil` | Not currently used |
+| app.sidecarContainers | list | `[]` | Provide sidecars that will be appended directly to the deployment next to the user-container |
 | app.terminationGracePeriodSeconds | string | `nil` | The amount of time in seconds to wait for the pod to shut down when a termination event has occurred. |
 | app.tolerations | list | `[]` | Any tolerations that should be applied to the deployment |
 | app.updateStrategy | string | `nil` | The strategy to use when rolling out new replicas |
@@ -152,6 +163,7 @@ A Helm chart for Neosync that contains the api, app, and worker
 | worker.autoscaling.targetCPUUtilizationPercentage | int | `80` | The CPU % utilization to begin a scale up |
 | worker.containerPort | int | `8080` | The container port |
 | worker.datadog.enabled | bool | `false` | Whether or not to apply the default Datadog annotations/labels to the deployment |
+| worker.deploymentAnnotations | object | `{}` | Provide a map of deployment annotations that will be attached to the deployment's annotations |
 | worker.extraEnvVars | list | `[]` | Provide extra environment variables that will be applied to the deployment. |
 | worker.fullnameOverride | string | `nil` | Fully overrides the chart name |
 | worker.host | string | `"0.0.0.0"` | Sets the host that the backend will listen on. 0.0.0.0 is common for Kubernetes workloads. |
@@ -166,6 +178,7 @@ A Helm chart for Neosync that contains the api, app, and worker
 | worker.nodeSelector | object | `{}` | Any node selectors that should be applied to the deployment |
 | worker.nucleusEnv | string | `nil` | Mostly used by NeosyncCloud. Adds a special tag to the logging to determine what environment is running |
 | worker.otel | object | `{"enabled":false,"otlpPort":4317}` | Will eventually allow sending traces. The worker does emit record-based metrics, but does not currently listen to otel.enabled. Must provide the OTEL_SDK_DISABLED=false environment variable separately today. |
+| worker.podAnnotations | object | `{}` | Provide a map of pod annotations that will be attached to the deployment's pod template annotations |
 | worker.redis.kind | string | `nil` | The kind of redis instance. simpke, cluster, failover |
 | worker.redis.master | string | `nil` | Name of redis master when in failover mode |
 | worker.redis.tls.clientCerts | list | `[]` | Client TLS Certificate files |
@@ -184,6 +197,7 @@ A Helm chart for Neosync that contains the api, app, and worker
 | worker.serviceAccount.name | string | `nil` | The name of the service account to use. If namenot set and create is true, a name is generated using fullname template |
 | worker.servicePort | int | `80` | The K8s service port |
 | worker.shutdownTimeoutSeconds | string | `nil` | Not currently used |
+| worker.sidecarContainers | list | `[]` | Provide sidecars that will be appended directly to the deployment next to the user-container |
 | worker.temporal.certificate.certContents | string | `nil` | The full contents of the certificate. Provide this or the certFilePath, not both. |
 | worker.temporal.certificate.certFilePath | string | `nil` | The location of the certificate file |
 | worker.temporal.certificate.keyContents | string | `nil` | The full contents of the key. Provide this or the keyFilePath, not both. |

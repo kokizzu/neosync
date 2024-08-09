@@ -1,16 +1,19 @@
 import { RESOURCE_NAME_REGEX } from '@/yup-validations/connections';
+import { PartialMessage } from '@bufbuild/protobuf';
 import {
+  ConnectError,
+  IsTransformerNameAvailableRequest,
   IsTransformerNameAvailableResponse,
   TransformerConfig,
+  ValidateUserJavascriptCodeRequest,
+  ValidateUserJavascriptCodeResponse,
 } from '@neosync/sdk';
+import { UseMutateAsyncFunction } from '@tanstack/react-query';
 import * as Yup from 'yup';
-import { tryBigInt } from '../../transformers/Sheetforms/util';
-import { IsUserJavascriptCodeValid } from './UserDefinedTransformerForms/UserDefinedTransformJavascriptForm';
 
-const bigIntValidator = Yup.mixed<bigint>().test(
-  'is-bigint',
-  'Value must be bigint',
-  (value) => {
+const bigIntValidator = Yup.mixed<bigint>()
+  .default(BigInt(0))
+  .test('is-bigint', 'Value must be bigint', (value) => {
     if (typeof value === 'bigint') {
       return true;
     } else if (typeof value === 'number') {
@@ -23,8 +26,7 @@ const bigIntValidator = Yup.mixed<bigint>().test(
         return false;
       }
     }
-  }
-);
+  });
 
 function getBigIntMinValidator(
   minVal: number | string | bigint
@@ -127,19 +129,35 @@ const generateInternationalPhoneNumberConfig = Yup.object().shape({
 const generateFloat64Config = Yup.object().shape({
   randomizeSign: Yup.bool().default(false),
   min: Yup.number()
+    .default(0)
     .required('This field is required.')
     .min(Number.MIN_SAFE_INTEGER)
-    .max(Number.MAX_SAFE_INTEGER),
+    .max(Number.MAX_SAFE_INTEGER)
+    .test(
+      'is-less-than-max',
+      'Min must be less than or equal to Max',
+      function (value) {
+        if (value === undefined || value === null) {
+          return false;
+        }
+        const { max } = this.parent;
+        return max == null || value <= max;
+      }
+    ),
   max: Yup.number()
+    .default(0)
     .required('This field is required.')
     .min(Number.MIN_SAFE_INTEGER)
     .max(Number.MAX_SAFE_INTEGER)
     .test(
       'is-greater-than-min',
-      'Max must be greater than Min',
+      'Max must be greater than or equal to Min',
       function (value) {
+        if (value === undefined || value === null) {
+          return false;
+        }
         const { min } = this.parent;
-        return !min || !value || value >= min;
+        return min == null || value >= min;
       }
     ),
   precision: bigIntValidator
@@ -165,8 +183,8 @@ const generateInt64Config = Yup.object().shape({
   min: bigIntValidator
     .test(
       'min',
-      'Value must be greater than or equal to 1',
-      getBigIntMinValidator(1)
+      `Value must be greater than or equal to ${Number.MIN_SAFE_INTEGER}`,
+      getBigIntMinValidator(Number.MIN_SAFE_INTEGER)
     )
     .test(
       'max',
@@ -183,8 +201,8 @@ const generateInt64Config = Yup.object().shape({
   max: bigIntValidator
     .test(
       'min',
-      'Value must be greater than or equal to 1',
-      getBigIntMinValidator(1)
+      `Value must be greater than or equal to ${Number.MIN_SAFE_INTEGER}`,
+      getBigIntMinValidator(Number.MIN_SAFE_INTEGER)
     )
     .test(
       'max',
@@ -249,17 +267,18 @@ const generateStringPhoneNumberConfig = Yup.object().shape({
 
 const generateStringConfig = Yup.object().shape({
   min: bigIntValidator
+    .default(BigInt(0))
     .test(
       'min',
-      'Value must be greater than or equal to 1',
-      getBigIntMinValidator(1)
+      'Value must be greater than or equal to 0',
+      getBigIntMinValidator(0)
     )
     .test(
       'max',
       `Value must be less than than or equal to ${Number.MAX_SAFE_INTEGER}`,
       getBigIntMaxValidator(Number.MAX_SAFE_INTEGER)
     )
-    .required('This field is required.')
+    .required('Must provide a valid number for GenerateString min.')
     .test('is-less-than-max', 'Min must be less than Max', function (value) {
       const { max } = this.parent;
       const maxBig = tryBigInt(max);
@@ -277,7 +296,7 @@ const generateStringConfig = Yup.object().shape({
       `Value must be less than than or equal to ${Number.MAX_SAFE_INTEGER}`,
       getBigIntMaxValidator(Number.MAX_SAFE_INTEGER)
     )
-    .required('This field is required.')
+    .required('Must provide a valid number for GenerateString Max.')
     .test(
       'is-greater-than-min',
       'Max must be greater than Min',
@@ -406,6 +425,12 @@ const userDefinedTransformerConfig = Yup.object().shape({
   id: Yup.string().required('This field is required.'),
 });
 
+const generateStateConfig = Yup.object().shape({
+  generateFullName: Yup.boolean()
+    .default(false)
+    .required('This field is required'),
+});
+
 const JavascriptConfig = Yup.object().shape({
   code: Yup.string()
     .required('This field is required.')
@@ -420,17 +445,29 @@ const JavascriptConfig = Yup.object().shape({
           });
         }
         try {
-          const res = await IsUserJavascriptCodeValid(value, accountId);
-          if (res.valid === true) {
-            return true;
-          } else {
-            return context.createError({
-              message: 'Javascript is not valid',
+          const isUserJavascriptCodeValid:
+            | UseMutateAsyncFunction<
+                ValidateUserJavascriptCodeResponse,
+                ConnectError,
+                PartialMessage<ValidateUserJavascriptCodeRequest>,
+                unknown
+              >
+            | undefined = context?.options?.context?.isUserJavascriptCodeValid;
+          if (isUserJavascriptCodeValid) {
+            const res = await isUserJavascriptCodeValid({
+              accountId,
+              code: value,
             });
+            if (!res.valid) {
+              return context.createError({
+                message: 'Javascript is not valid',
+              });
+            }
           }
+          return true;
         } catch (error) {
           return context.createError({
-            message: 'Unable to verify Javascript code.',
+            message: `Unable to verify Javascript code: ${error}`,
           });
         }
       }
@@ -438,7 +475,9 @@ const JavascriptConfig = Yup.object().shape({
 });
 
 const generateCategoricalConfig = Yup.object().shape({
-  categories: Yup.string().required('This field is required.'),
+  categories: Yup.string()
+    .min(1, 'Must have at least one category')
+    .required('This field is required.'),
 });
 
 type ConfigType = TransformerConfig['config'];
@@ -458,7 +497,7 @@ const EMPTY_TRANSFORMER_VALUE_CONFIG = Yup.object({});
 
 // Using this "as const" allows typescript to infer the types based on the shape we've described in the Yup object
 // Ideally we can more explicitly type this in the future based on the Transformer types we get from @neosync/sdk
-export const TRANSFORMER_SCHEMA_CONFIGS = {
+const TRANSFORMER_SCHEMA_CONFIGS = {
   generateBoolConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
   generateCityConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
   generateDefaultConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
@@ -469,7 +508,6 @@ export const TRANSFORMER_SCHEMA_CONFIGS = {
   generateLastNameConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
   generateSha256hashConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
   generateSsnConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
-  generateStateConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
   generateStreetAddressConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
   generateUnixtimestampConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
   generateUsernameConfig: EMPTY_TRANSFORMER_VALUE_CONFIG,
@@ -502,6 +540,7 @@ export const TRANSFORMER_SCHEMA_CONFIGS = {
   generateCategoricalConfig: generateCategoricalConfig,
   transformCharacterScrambleConfig: transformCharacterScrambleConfig,
   generateJavascriptConfig: JavascriptConfig,
+  generateStateConfig: generateStateConfig,
 } as const;
 
 // This is here so that whenever we add a new transformer, it errors due to the typing of the key to the TransformerConfigCase
@@ -565,11 +604,24 @@ const transformerNameSchema = Yup.string()
       }
 
       try {
-        const res = await isTransformerNameAvailable(value, accountId);
-        if (!res.isAvailable) {
-          return context.createError({
-            message: 'This Transformer Name is already taken.',
+        const isTransformerNameAvailable:
+          | UseMutateAsyncFunction<
+              IsTransformerNameAvailableResponse,
+              ConnectError,
+              PartialMessage<IsTransformerNameAvailableRequest>,
+              unknown
+            >
+          | undefined = context?.options?.context?.isTransformerNameAvailable;
+        if (isTransformerNameAvailable) {
+          const res = await isTransformerNameAvailable({
+            accountId,
+            transformerName: value,
           });
+          if (!res.isAvailable) {
+            return context.createError({
+              message: 'This Transformer Name is already taken.',
+            });
+          }
         }
         return true;
       } catch (error) {
@@ -580,43 +632,71 @@ const transformerNameSchema = Yup.string()
     }
   );
 
-export const CREATE_USER_DEFINED_TRANSFORMER_SCHEMA = Yup.object({
+export const CreateUserDefinedTransformerFormValues = Yup.object({
   name: transformerNameSchema,
   source: Yup.number(),
   description: Yup.string().required(),
   config: TransformerConfigSchema,
 });
 
-export type CreateUserDefinedTransformerSchema = Yup.InferType<
-  typeof CREATE_USER_DEFINED_TRANSFORMER_SCHEMA
+export type CreateUserDefinedTransformerFormValues = Yup.InferType<
+  typeof CreateUserDefinedTransformerFormValues
 >;
 
-export const UPDATE_USER_DEFINED_TRANSFORMER = Yup.object({
+export interface CreateUserDefinedTransformerFormContext {
+  accountId: string;
+  isTransformerNameAvailable: UseMutateAsyncFunction<
+    IsTransformerNameAvailableResponse,
+    ConnectError,
+    PartialMessage<IsTransformerNameAvailableRequest>,
+    unknown
+  >;
+  isUserJavascriptCodeValid: UseMutateAsyncFunction<
+    ValidateUserJavascriptCodeResponse,
+    ConnectError,
+    PartialMessage<ValidateUserJavascriptCodeRequest>,
+    unknown
+  >;
+}
+
+export const EditJobMappingTransformerConfigFormValues = Yup.object({
+  config: TransformerConfigSchema,
+});
+export type EditJobMappingTransformerConfigFormValues = Yup.InferType<
+  typeof EditJobMappingTransformerConfigFormValues
+>;
+
+export interface EditJobMappingTransformerConfigFormContext {
+  accountId: string;
+  isUserJavascriptCodeValid: UseMutateAsyncFunction<
+    ValidateUserJavascriptCodeResponse,
+    ConnectError,
+    PartialMessage<ValidateUserJavascriptCodeRequest>,
+    unknown
+  >;
+}
+
+export const UpdateUserDefinedTransformerFormValues = Yup.object({
   name: transformerNameSchema,
   id: Yup.string(),
   description: Yup.string().required(),
   config: TransformerConfigSchema,
 });
 
-export type UpdateUserDefinedTransformer = Yup.InferType<
-  typeof UPDATE_USER_DEFINED_TRANSFORMER
+export type UpdateUserDefinedTransformerFormValues = Yup.InferType<
+  typeof UpdateUserDefinedTransformerFormValues
 >;
-async function isTransformerNameAvailable(
-  name: string,
-  accountId: string
-): Promise<IsTransformerNameAvailableResponse> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/transformers/is-transformer-name-available?transformerName=${name}`,
-    {
-      method: 'GET',
-      headers: {
-        'content-type': 'application/json',
-      },
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
+
+export interface EditUserDefinedTransformerFormContext
+  extends CreateUserDefinedTransformerFormContext {
+  name: string;
+}
+
+function tryBigInt(val: bigint | boolean | number | string): bigint | null {
+  try {
+    const newInt = BigInt(val);
+    return newInt;
+  } catch {
+    return null;
   }
-  return IsTransformerNameAvailableResponse.fromJson(await res.json());
 }

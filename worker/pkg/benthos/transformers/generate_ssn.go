@@ -2,18 +2,26 @@ package transformers
 
 import (
 	"fmt"
-	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
+	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
 	"github.com/nucleuscloud/neosync/worker/pkg/rng"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
+
+// +neosyncTransformerBuilder:generate:generateSSN
 
 func init() {
 	spec := bloblang.NewPluginSpec().
-		Param(bloblang.NewInt64Param("seed").Default(time.Now().UnixNano()))
+		Description("Generates a completely random social security numbers including the hyphens in the format xxx-xx-xxxx.").
+		Param(bloblang.NewInt64Param("seed").Optional().Description("An optional seed value used to generate deterministic outputs."))
 
 	err := bloblang.RegisterFunctionV2("generate_ssn", spec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
-		seed, err := args.GetInt64("seed")
+		seedArg, err := args.GetOptionalInt64("seed")
+		if err != nil {
+			return nil, err
+		}
+
+		seed, err := transformer_utils.GetSeedOrDefault(seedArg)
 		if err != nil {
 			return nil, err
 		}
@@ -26,6 +34,15 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (t *GenerateSSN) Generate(opts any) (any, error) {
+	parsedOpts, ok := opts.(*GenerateSSNOpts)
+	if !ok {
+		return nil, fmt.Errorf("invalid parsed opts: %T", opts)
+	}
+
+	return generateRandomSSN(parsedOpts.randomizer), nil
 }
 
 /*

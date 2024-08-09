@@ -64,9 +64,10 @@ packages:
     interfaces:
       SqlDatabase:
       SqlManagerClient:
-  github.com/nucleuscloud/neosync/backend/internal/aws:
+  github.com/nucleuscloud/neosync/internal/aws:
     interfaces:
       NeosyncAwsManagerClient:
+      dynamoDBAPIV2:
   github.com/nucleuscloud/neosync/worker/pkg/workflows/datasync/activities/sync:
     interfaces:
       sqlProvider:
@@ -93,9 +94,6 @@ packages:
   github.com/nucleuscloud/neosync/worker/internal/connection-tunnel-manager:
     interfaces:
       ConnectionProvider:
-  go.temporal.io/sdk/client:
-    config:
-      dir: "worker/internal/mocks/{{.PackagePath}}"
-    # interfaces:
-    # this is broken. it uses the wrong package. after running mockery change internal to client in mock
-    # Client:
+  github.com/nucleuscloud/neosync/worker/pkg/benthos/dynamodb:
+    interfaces:
+      dynamoDBAPIV2:

@@ -1,26 +1,34 @@
 package transformers
 
 import (
-	"math/rand"
-	"time"
+	"fmt"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
+	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
 	"github.com/nucleuscloud/neosync/worker/pkg/rng"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
+
+// +neosyncTransformerBuilder:generate:generateBool
 
 func init() {
 	spec := bloblang.NewPluginSpec().
-		Param(bloblang.NewInt64Param("seed").Default(time.Now().UnixNano()))
+		Description("Generates a boolean value at random.").
+		Param(bloblang.NewInt64Param("seed").Optional().Description("An optional seed value used to generate deterministic outputs."))
 
 	err := bloblang.RegisterFunctionV2("generate_bool", spec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
-		seed, err := args.GetInt64("seed")
+		seedArg, err := args.GetOptionalInt64("seed")
+		if err != nil {
+			return nil, err
+		}
+
+		seed, err := transformer_utils.GetSeedOrDefault(seedArg)
 		if err != nil {
 			return nil, err
 		}
 		randomizer := rng.New(seed)
 
 		return func() (any, error) {
-			return generateRandomizerBool(randomizer), nil
+			return generateRandomBool(randomizer), nil
 		}, nil
 	})
 	if err != nil {
@@ -28,14 +36,16 @@ func init() {
 	}
 }
 
-// Generates a random bool value and returns it as a bool type.
-func generateRandomBool() bool {
-	//nolint:gosec
-	randInt := rand.Intn(2)
-	return randInt == 1
+func (t *GenerateBool) Generate(opts any) (any, error) {
+	parsedOpts, ok := opts.(*GenerateBoolOpts)
+	if !ok {
+		return nil, fmt.Errorf("invalid parsed opts: %T", opts)
+	}
+
+	return generateRandomBool(parsedOpts.randomizer), nil
 }
 
-func generateRandomizerBool(randomizer rng.Rand) bool {
+func generateRandomBool(randomizer rng.Rand) bool {
 	randInt := randomizer.Intn(2)
 	return randInt == 1
 }

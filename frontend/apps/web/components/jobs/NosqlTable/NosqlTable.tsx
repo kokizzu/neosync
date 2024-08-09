@@ -26,22 +26,25 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { ConnectionSchemaMap } from '@/libs/hooks/useGetConnectionSchemaMap';
 import { useGetTransformersHandler } from '@/libs/hooks/useGetTransformersHandler';
 import { Transformer } from '@/shared/transformers';
 import {
+  convertJobMappingTransformerToForm,
+  EditDestinationOptionsFormValues,
   JobMappingFormValues,
   JobMappingTransformerForm,
-  convertJobMappingTransformerToForm,
 } from '@/yup-validations/jobs';
+import { useMutation } from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import {
+  GetConnectionSchemaResponse,
   JobMappingTransformer,
   Passthrough,
   SystemTransformer,
   TransformerConfig,
   TransformerSource,
 } from '@neosync/sdk';
+import { validateUserJavascriptCode } from '@neosync/sdk/connectquery';
 import { TableIcon } from '@radix-ui/react-icons';
 import { ColumnDef } from '@tanstack/react-table';
 import { HTMLProps, ReactElement, useEffect, useMemo, useRef } from 'react';
@@ -53,11 +56,16 @@ import SchemaPageTable, { Row } from '../SchemaTable/SchemaPageTable';
 import TransformerSelect from '../SchemaTable/TransformerSelect';
 import { SchemaConstraintHandler } from '../SchemaTable/schema-constraint-handler';
 import { TransformerHandler } from '../SchemaTable/transformer-handler';
+import {
+  DestinationDetails,
+  OnTableMappingUpdateRequest,
+} from './TableMappings/Columns';
+import TableMappingsCard from './TableMappings/TableMappingsCard';
 import { DataTableRowActions } from './data-table-row-actions';
 
 interface Props {
   data: JobMappingFormValues[];
-  schema: ConnectionSchemaMap;
+  schema: Record<string, GetConnectionSchemaResponse>;
   isSchemaDataReloading: boolean;
   constraintHandler: SchemaConstraintHandler;
   isJobMappingsValidating?: boolean;
@@ -68,6 +76,11 @@ interface Props {
   onAddMappings(values: AddNewNosqlRecordFormValues[]): void;
   onRemoveMappings(values: JobMappingFormValues[]): void;
   onEditMappings(values: JobMappingFormValues[]): void;
+
+  destinationOptions: EditDestinationOptionsFormValues[];
+  destinationDetailsRecord: Record<string, DestinationDetails>;
+  onDestinationTableMappingUpdate(req: OnTableMappingUpdateRequest): void;
+  showDestinationTableMappings: boolean;
 }
 
 export default function NosqlTable(props: Props): ReactElement {
@@ -81,6 +94,10 @@ export default function NosqlTable(props: Props): ReactElement {
     onAddMappings,
     onRemoveMappings,
     onEditMappings,
+    destinationOptions,
+    destinationDetailsRecord,
+    onDestinationTableMappingUpdate,
+    showDestinationTableMappings,
   } = props;
   const { account } = useAccount();
   const { handler, isLoading, isValidating } = useGetTransformersHandler(
@@ -133,6 +150,15 @@ export default function NosqlTable(props: Props): ReactElement {
           onValidate={onValidate}
         />
       </div>
+      {showDestinationTableMappings && (
+        <div>
+          <TableMappingsCard
+            mappings={destinationOptions}
+            onUpdate={onDestinationTableMappingUpdate}
+            destinationDetailsRecord={destinationDetailsRecord}
+          />
+        </div>
+      )}
       <SchemaPageTable
         columns={columns}
         data={data}
@@ -143,7 +169,6 @@ export default function NosqlTable(props: Props): ReactElement {
     </div>
   );
 }
-
 interface AddNewRecordProps {
   collections: string[];
   onSubmit(values: AddNewNosqlRecordFormValues): void;
@@ -162,6 +187,11 @@ type AddNewNosqlRecordFormValues = Yup.InferType<
 function AddNewRecord(props: AddNewRecordProps): ReactElement {
   const { collections, onSubmit, transformerHandler } = props;
 
+  const { account } = useAccount();
+  const { mutateAsync: validateUserJsCodeAsync } = useMutation(
+    validateUserJavascriptCode
+  );
+
   const form = useForm<AddNewNosqlRecordFormValues>({
     resolver: yupResolver(AddNewNosqlRecordFormValues),
     defaultValues: {
@@ -178,6 +208,10 @@ function AddNewRecord(props: AddNewRecordProps): ReactElement {
           }),
         })
       ),
+    },
+    context: {
+      accountId: account?.id,
+      isUserJavascriptCodeValid: validateUserJsCodeAsync,
     },
   });
   return (
@@ -348,7 +382,15 @@ function getColumns(props: GetColumnsProps): ColumnDef<Row>[] {
       ),
     },
     {
-      accessorFn: (row) => `${row.schema}.${row.table}`,
+      accessorFn: (row) => {
+        if (row.schema && row.table) {
+          return `${row.schema}.${row.table}`;
+        }
+        if (row.schema) {
+          return row.schema;
+        }
+        return row.table;
+      },
       id: 'schemaTable',
       footer: (props) => props.column.id,
       header: ({ column }) => (

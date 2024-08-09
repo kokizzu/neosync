@@ -8,16 +8,16 @@ import {
 } from '@/components/ui/card';
 
 import { FormDescription, FormLabel } from '@/components/ui/form';
-import { toast } from '@/components/ui/use-toast';
-import { ConnectionSchemaMap } from '@/libs/hooks/useGetConnectionSchemaMap';
 import { VirtualForeignConstraintFormValues } from '@/yup-validations/jobs';
+import { GetConnectionSchemaResponse } from '@neosync/sdk';
 import { ReactElement, useState } from 'react';
 import { GoWorkflow } from 'react-icons/go';
+import { toast } from 'sonner';
 import { StringSelect } from './StringSelect';
 import { SchemaConstraintHandler } from './schema-constraint-handler';
 
 interface Props {
-  schema: ConnectionSchemaMap;
+  schema: Record<string, GetConnectionSchemaResponse>;
   virtualForeignKey?: VirtualForeignConstraintFormValues;
   selectedTables: Set<string>;
   addVirtualForeignKey: (vfk: VirtualForeignConstraintFormValues) => void;
@@ -88,13 +88,13 @@ export function VirtualForeignKeyForm(props: Props): ReactElement {
           </div>
           <CardDescription>
             Select the source table and columns, as well as the target table and
-            columns, to create a virtual foreign key. <br /> Add additional
-            columns to create a composite virtual foreign key.
+            columns, to create a virtual foreign key. Add additional columns to
+            create a composite virtual foreign key.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-2">
-            <div className="flex flex-col md:flex-row gap-6">
+            <div className="flex flex-col md:flex-row gap-12">
               <div className="flex flex-col gap-2">
                 <FormLabel>Source</FormLabel>
                 <FormDescription>The primary key</FormDescription>
@@ -136,79 +136,78 @@ export function VirtualForeignKeyForm(props: Props): ReactElement {
                     setValue={setTargetTable}
                     text="table"
                   />
-                  <div className="flex flex-col gap-3">
-                    {targetColumns.map((col, index) => (
-                      <StringSelect
-                        key={index}
-                        value={col}
-                        values={getTargetColumnOptions(schema, targetTable)}
-                        badgeValueMap={getColumnDataTypeMap(
-                          schema,
-                          targetTable
-                        )}
-                        setValue={(value) => updateTargetColumn(index, value)}
-                        text="column"
-                      />
-                    ))}
-                  </div>
-                  <div className="flex flex-row gap-2">
+                  <div className="flex flex-row items-start gap-4">
+                    <div className="flex flex-col gap-3">
+                      {targetColumns.map((col, index) => (
+                        <StringSelect
+                          key={index}
+                          value={col}
+                          values={getTargetColumnOptions(schema, targetTable)}
+                          badgeValueMap={getColumnDataTypeMap(
+                            schema,
+                            targetTable
+                          )}
+                          setValue={(value) => updateTargetColumn(index, value)}
+                          text="column"
+                        />
+                      ))}
+                    </div>
                     <Button
                       type="button"
-                      variant="outline"
-                      onClick={addCompositeColumns}
-                    >
-                      +
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={removeLastCompositeColumn}
-                    >
-                      -
-                    </Button>
-                  </div>
-                </div>
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    key="virtualforeignkey"
-                    className="w-[90px]"
-                    onClick={() => {
-                      if (
-                        !sourceTable ||
-                        sourceColumns.includes('') ||
-                        !targetTable ||
-                        targetColumns.includes('')
-                      ) {
-                        toast({
-                          title: 'Unable to add virtual foreign key',
-                          description: 'Missing required field',
-                          variant: 'destructive',
+                      key="virtualforeignkey"
+                      className="w-[90px]"
+                      onClick={() => {
+                        if (
+                          !sourceTable ||
+                          sourceColumns.includes('') ||
+                          !targetTable ||
+                          targetColumns.includes('')
+                        ) {
+                          toast.error('Unable to add virtual foreign key', {
+                            description: 'Missing required field',
+                          });
+                          return;
+                        }
+                        const source = splitSchemaTable(sourceTable);
+                        const target = splitSchemaTable(targetTable);
+                        addVirtualForeignKey({
+                          schema: target.schema,
+                          table: target.table,
+                          columns: targetColumns,
+                          foreignKey: {
+                            schema: source.schema,
+                            table: source.table,
+                            columns: sourceColumns,
+                          },
                         });
-                        return;
-                      }
-                      const source = splitSchemaTable(sourceTable);
-                      const target = splitSchemaTable(targetTable);
-                      addVirtualForeignKey({
-                        schema: target.schema,
-                        table: target.table,
-                        columns: targetColumns,
-                        foreignKey: {
-                          schema: source.schema,
-                          table: source.table,
-                          columns: sourceColumns,
-                        },
-                      });
-                      setSourceTable(undefined);
-                      setSourceColumns(['']);
-                      setTargetTable(undefined);
-                      setTargetColumns(['']);
-                    }}
-                  >
-                    Add
-                  </Button>
+                        setSourceTable(undefined);
+                        setSourceColumns(['']);
+                        setTargetTable(undefined);
+                        setTargetColumns(['']);
+                      }}
+                    >
+                      Save
+                    </Button>
+                  </div>
                 </div>
+                <div className="flex justify-end"></div>
               </div>
+            </div>
+            <div className="flex flex-row gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={addCompositeColumns}
+              >
+                +
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={removeLastCompositeColumn}
+              >
+                -
+              </Button>
             </div>
           </div>
         </CardContent>
@@ -218,7 +217,7 @@ export function VirtualForeignKeyForm(props: Props): ReactElement {
 }
 
 function getColumnDataTypeMap(
-  schema: ConnectionSchemaMap,
+  schema: Record<string, GetConnectionSchemaResponse>,
   table?: string
 ): Record<string, string> {
   const results: Record<string, string> = {};
@@ -226,14 +225,17 @@ function getColumnDataTypeMap(
     return results;
   }
   const columns = schema[table];
-  columns.forEach((c) => {
+  if (!columns) {
+    return results;
+  }
+  columns.schemas.forEach((c) => {
     results[c.column] = c.dataType;
   });
   return results;
 }
 
 function getSourceColumnOptions(
-  schema: ConnectionSchemaMap,
+  schema: Record<string, GetConnectionSchemaResponse>,
   constraintHandler: SchemaConstraintHandler,
   table?: string
 ): string[] {
@@ -241,8 +243,11 @@ function getSourceColumnOptions(
     return [];
   }
   const columns = new Set<string>();
-  const cols = schema[table];
-  cols.forEach((c) => {
+  const schemaResp = schema[table];
+  if (!schemaResp) {
+    return [];
+  }
+  schemaResp.schemas.forEach((c) => {
     const colkey = {
       schema: c.schema,
       table: c.table,
@@ -264,7 +269,7 @@ function getSourceColumnOptions(
 }
 
 function getTargetColumnOptions(
-  schema: ConnectionSchemaMap,
+  schema: Record<string, GetConnectionSchemaResponse>,
   table?: string
 ): string[] {
   if (!table) {
@@ -272,7 +277,10 @@ function getTargetColumnOptions(
   }
   const columns = new Set<string>();
   const cols = schema[table];
-  cols.forEach((c) => {
+  if (!cols) {
+    return [];
+  }
+  cols.schemas.forEach((c) => {
     columns.add(c.column);
   });
   return Array.from(columns);

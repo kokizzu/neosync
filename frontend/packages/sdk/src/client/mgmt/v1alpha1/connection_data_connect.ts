@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { GetAiGeneratedDataRequest, GetAiGeneratedDataResponse, GetConnectionDataStreamRequest, GetConnectionDataStreamResponse, GetConnectionForeignConstraintsRequest, GetConnectionForeignConstraintsResponse, GetConnectionInitStatementsRequest, GetConnectionInitStatementsResponse, GetConnectionPrimaryConstraintsRequest, GetConnectionPrimaryConstraintsResponse, GetConnectionSchemaRequest, GetConnectionSchemaResponse, GetConnectionTableConstraintsRequest, GetConnectionTableConstraintsResponse, GetConnectionUniqueConstraintsRequest, GetConnectionUniqueConstraintsResponse, GetTableRowCountRequest, GetTableRowCountResponse } from "./connection_data_pb.js";
+import { GetAiGeneratedDataRequest, GetAiGeneratedDataResponse, GetConnectionDataStreamRequest, GetConnectionDataStreamResponse, GetConnectionForeignConstraintsRequest, GetConnectionForeignConstraintsResponse, GetConnectionInitStatementsRequest, GetConnectionInitStatementsResponse, GetConnectionPrimaryConstraintsRequest, GetConnectionPrimaryConstraintsResponse, GetConnectionSchemaMapRequest, GetConnectionSchemaMapResponse, GetConnectionSchemaMapsRequest, GetConnectionSchemaMapsResponse, GetConnectionSchemaRequest, GetConnectionSchemaResponse, GetConnectionTableConstraintsRequest, GetConnectionTableConstraintsResponse, GetConnectionUniqueConstraintsRequest, GetConnectionUniqueConstraintsResponse, GetTableRowCountRequest, GetTableRowCountResponse } from "./connection_data_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -36,6 +36,28 @@ export const ConnectionDataService = {
       name: "GetConnectionSchema",
       I: GetConnectionSchemaRequest,
       O: GetConnectionSchemaResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Returns the schema in map format. The keys are the fully qualified table in the format <schema>.<table>
+     *
+     * @generated from rpc mgmt.v1alpha1.ConnectionDataService.GetConnectionSchemaMap
+     */
+    getConnectionSchemaMap: {
+      name: "GetConnectionSchemaMap",
+      I: GetConnectionSchemaMapRequest,
+      O: GetConnectionSchemaMapResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Returns the schema in map format for every request provided
+     *
+     * @generated from rpc mgmt.v1alpha1.ConnectionDataService.GetConnectionSchemaMaps
+     */
+    getConnectionSchemaMaps: {
+      name: "GetConnectionSchemaMaps",
+      I: GetConnectionSchemaMapsRequest,
+      O: GetConnectionSchemaMapsResponse,
       kind: MethodKind.Unary,
     },
     /**

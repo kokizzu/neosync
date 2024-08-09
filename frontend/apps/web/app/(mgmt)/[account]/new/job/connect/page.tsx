@@ -1,4 +1,5 @@
 'use client';
+import FormPersist from '@/app/(mgmt)/FormPersist';
 import OverviewContainer from '@/components/containers/OverviewContainer';
 import PageHeader from '@/components/headers/PageHeader';
 import SourceOptionsForm from '@/components/jobs/Form/SourceOptionsForm';
@@ -20,30 +21,32 @@ import {
 } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useGetConnections } from '@/libs/hooks/useGetConnections';
 import { getSingleOrUndefined, splitConnections } from '@/libs/utils';
+import { useQuery } from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
-import { ConnectionConfig } from '@neosync/sdk';
+import { Connection, ConnectionConfig } from '@neosync/sdk';
+import { getConnections } from '@neosync/sdk/connectquery';
 import { Cross2Icon, PlusIcon } from '@radix-ui/react-icons';
 import { useRouter } from 'next/navigation';
 import { usePostHog } from 'posthog-js/react';
 import { ReactElement, useEffect } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
-import useFormPersist from 'react-hook-form-persist';
 import { useSessionStorage } from 'usehooks-ts';
 import DestinationOptionsForm from '../../../../../../components/jobs/Form/DestinationOptionsForm';
 import {
-  DESTINATION_ONLY_CONNECTION_TYPES,
+  getAllowedSyncDestinationTypes,
+  getAllowedSyncSourceTypes,
   getConnectionType,
 } from '../../../connections/util';
-import { getNewJobSessionKeys } from '../../../jobs/util';
+import {
+  getDefaultUnmappedTransformConfig,
+  getNewJobSessionKeys,
+} from '../../../jobs/util';
 import JobsProgressSteps, { getJobProgressSteps } from '../JobsProgressSteps';
 import { ConnectFormValues } from '../schema';
 import ConnectionSelectContent from './ConnectionSelectContent';
 
 const NEW_CONNECTION_VALUE = 'new-connection';
-
-const isBrowser = () => typeof window !== 'undefined';
 
 export default function Page({ searchParams }: PageProps): ReactElement {
   const { account } = useAccount();
@@ -63,9 +66,11 @@ export default function Page({ searchParams }: PageProps): ReactElement {
     destinations: [{ connectionId: '', destinationOptions: {} }],
   });
 
-  const { isLoading: isConnectionsLoading, data: connectionsData } =
-    useGetConnections(account?.id ?? '');
-
+  const { isLoading: isConnectionsLoading, data: connectionsData } = useQuery(
+    getConnections,
+    { accountId: account?.id },
+    { enabled: !!account?.id }
+  );
   const connections = connectionsData?.connections ?? [];
 
   const form = useForm<ConnectFormValues>({
@@ -80,11 +85,6 @@ export default function Page({ searchParams }: PageProps): ReactElement {
     name: 'destinations',
   });
 
-  useFormPersist(sessionKey, {
-    watch: form.watch,
-    setValue: form.setValue,
-    storage: isBrowser() ? window.sessionStorage : undefined,
-  });
   const posthog = usePostHog();
 
   async function onSubmit(_values: ConnectFormValues) {
@@ -92,13 +92,15 @@ export default function Page({ searchParams }: PageProps): ReactElement {
     router.push(`/${account?.name}/new/job/schema?sessionId=${sessionPrefix}`);
   }
 
-  const { postgres, mysql, s3, mongodb, gcpcs } = splitConnections(connections);
+  const { postgres, mysql, s3, mongodb, gcpcs, dynamodb } =
+    splitConnections(connections);
 
   return (
     <div
       id="newjobflowcontainer"
       className="px-12 md:px-24 lg:px-48 xl:px-64 flex flex-col gap-5"
     >
+      <FormPersist formKey={sessionKey} form={form} />
       <OverviewContainer
         Header={
           <PageHeader
@@ -169,24 +171,15 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                                         new ConnectionConfig()
                                     )
                                   )
+                                  .filter((x) => !!x)
                               );
-                              connTypes.forEach((connType) => {
-                                if (
-                                  connType &&
-                                  !DESTINATION_ONLY_CONNECTION_TYPES.has(
-                                    connType
-                                  )
-                                ) {
-                                  urlParams.append('connectionType', connType);
-                                }
-                              });
-                              if (
-                                urlParams.getAll('connectionType').length === 0
-                              ) {
-                                urlParams.append('connectionType', 'postgres');
-                                urlParams.append('connectionType', 'mysql');
-                                urlParams.append('connectionType', 'mongodb');
-                              }
+                              const allowedSourceTypes =
+                                getAllowedSyncSourceTypes(
+                                  Array.from(connTypes)
+                                );
+                              allowedSourceTypes.forEach((sourceType) =>
+                                urlParams.append('connectionType', sourceType)
+                              );
 
                               router.push(
                                 `/${account?.name}/new/connection?${urlParams.toString()}`
@@ -194,9 +187,68 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                               return;
                             }
                             field.onChange(value);
-                            form.setValue('sourceOptions', {
-                              haltOnNewColumnAddition: false,
-                            });
+                            const connection =
+                              connections.find((c) => c.id === value) ??
+                              new Connection();
+                            const connectionType = getConnectionType(
+                              connection.connectionConfig ??
+                                new ConnectionConfig()
+                            );
+                            if (connectionType === 'pgConfig') {
+                              form.setValue(
+                                'sourceOptions',
+                                {
+                                  postgres: {
+                                    haltOnNewColumnAddition: false,
+                                  },
+                                },
+                                {
+                                  shouldDirty: true,
+                                  shouldTouch: true,
+                                  shouldValidate: true,
+                                }
+                              );
+                            } else if (connectionType === 'mysqlConfig') {
+                              form.setValue(
+                                'sourceOptions',
+                                {
+                                  mysql: {
+                                    haltOnNewColumnAddition: false,
+                                  },
+                                },
+                                {
+                                  shouldDirty: true,
+                                  shouldTouch: true,
+                                  shouldValidate: true,
+                                }
+                              );
+                            } else if (connectionType === 'dynamodbConfig') {
+                              form.setValue(
+                                'sourceOptions',
+                                {
+                                  dynamodb: {
+                                    unmappedTransformConfig:
+                                      getDefaultUnmappedTransformConfig(),
+                                    enableConsistentRead: false,
+                                  },
+                                },
+                                {
+                                  shouldDirty: true,
+                                  shouldTouch: true,
+                                  shouldValidate: true,
+                                }
+                              );
+                            } else {
+                              form.setValue(
+                                'sourceOptions',
+                                {},
+                                {
+                                  shouldDirty: true,
+                                  shouldTouch: true,
+                                  shouldValidate: true,
+                                }
+                              );
+                            }
                           }}
                           value={field.value}
                         >
@@ -211,6 +263,7 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                               postgres={postgres}
                               mysql={mysql}
                               mongodb={mongodb}
+                              dynamodb={dynamodb}
                               newConnectionValue={NEW_CONNECTION_VALUE}
                             />
                           </SelectContent>
@@ -222,9 +275,21 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                 )}
               />
 
-              <SourceOptionsForm
-                connection={connections.find(
-                  (c) => c.id === form.getValues().sourceId
+              <FormField
+                control={form.control}
+                name="sourceOptions"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormControl>
+                      <SourceOptionsForm
+                        connection={connections.find(
+                          (c) => c.id === form.getValues().sourceId
+                        )}
+                        value={field.value}
+                        setValue={(newOpts) => field.onChange(newOpts)}
+                      />
+                    </FormControl>
+                  </FormItem>
                 )}
               />
             </div>
@@ -244,9 +309,6 @@ export default function Page({ searchParams }: PageProps): ReactElement {
             </div>
             <div className="space-y-12 col-span-2">
               {fields.map((val, index) => {
-                const destOpts = form.watch(
-                  `destinations.${index}.destinationOptions`
-                );
                 return (
                   <div className="space-y-4 col-span-2" key={val.id}>
                     <div className="flex flew-row space-x-4">
@@ -267,52 +329,29 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                                       if (!value) {
                                         return;
                                       }
-                                      if (value === NEW_CONNECTION_VALUE) {
-                                        const sourceId =
-                                          form.getValues('sourceId');
+                                      const sourceId =
+                                        form.getValues('sourceId');
+                                      const connection = connections.find(
+                                        (c) => c.id === sourceId
+                                      );
 
+                                      if (value === NEW_CONNECTION_VALUE) {
                                         const urlParams = new URLSearchParams({
                                           returnTo: `/${account?.name}/new/job/connect?sessionId=${sessionPrefix}&from=new-connection`,
                                         });
 
-                                        const connection = connections.find(
-                                          (c) => c.id === sourceId
+                                        const allowedDestinationConnectionTypes =
+                                          getAllowedSyncDestinationTypes(
+                                            connection?.connectionConfig?.config
+                                              .case
+                                          );
+                                        allowedDestinationConnectionTypes.forEach(
+                                          (ct) =>
+                                            urlParams.append(
+                                              'connectionType',
+                                              ct
+                                            )
                                         );
-                                        const connType = getConnectionType(
-                                          connection?.connectionConfig ??
-                                            new ConnectionConfig()
-                                        );
-                                        if (connType) {
-                                          urlParams.append(
-                                            'connectionType',
-                                            connType
-                                          );
-                                        }
-                                        if (
-                                          urlParams.getAll('connectionType')
-                                            .length === 0
-                                        ) {
-                                          urlParams.append(
-                                            'connectionType',
-                                            'postgres'
-                                          );
-                                          urlParams.append(
-                                            'connectionType',
-                                            'mysql'
-                                          );
-                                          urlParams.append(
-                                            'connectionType',
-                                            'aws-s3'
-                                          );
-                                          urlParams.append(
-                                            'connectionType',
-                                            'gcp-cloud-storage'
-                                          );
-                                          urlParams.append(
-                                            'connectionType',
-                                            'mongodb'
-                                          );
-                                        }
 
                                         router.push(
                                           `/${account?.name}/new/connection?${urlParams.toString()}`
@@ -321,15 +360,65 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                                       }
                                       // set values
                                       field.onChange(value);
-                                      form.setValue(
-                                        `destinations.${index}.destinationOptions`,
-                                        {
-                                          truncateBeforeInsert: false,
-                                          truncateCascade: false,
-                                          initTableSchema: false,
-                                          onConflictDoNothing: false,
-                                        }
+                                      const destConnection = connections.find(
+                                        (c) => c.id === value
                                       );
+                                      const destConnType = getConnectionType(
+                                        destConnection?.connectionConfig ??
+                                          new ConnectionConfig()
+                                      );
+                                      if (destConnType === 'pgConfig') {
+                                        form.setValue(
+                                          `destinations.${index}.destinationOptions`,
+                                          {
+                                            postgres: {
+                                              truncateBeforeInsert: false,
+                                              truncateCascade: false,
+                                              initTableSchema: false,
+                                              onConflictDoNothing: false,
+                                            },
+                                          },
+                                          {
+                                            shouldDirty: true,
+                                            shouldTouch: true,
+                                            shouldValidate: true,
+                                          }
+                                        );
+                                      } else if (
+                                        destConnType === 'mysqlConfig'
+                                      ) {
+                                        form.setValue(
+                                          `destinations.${index}.destinationOptions`,
+                                          {
+                                            mysql: {
+                                              truncateBeforeInsert: false,
+                                              initTableSchema: false,
+                                              onConflictDoNothing: false,
+                                            },
+                                          },
+                                          {
+                                            shouldDirty: true,
+                                            shouldTouch: true,
+                                            shouldValidate: true,
+                                          }
+                                        );
+                                      } else if (
+                                        destConnType === 'dynamodbConfig'
+                                      ) {
+                                        form.setValue(
+                                          `destinations.${index}.destinationOptions`,
+                                          {
+                                            dynamodb: {
+                                              tableMappings: [],
+                                            },
+                                          },
+                                          {
+                                            shouldDirty: true,
+                                            shouldTouch: true,
+                                            shouldValidate: true,
+                                          }
+                                        );
+                                      }
                                     }}
                                     value={field.value}
                                   >
@@ -346,6 +435,7 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                                         s3={s3}
                                         mongodb={mongodb}
                                         gcpcs={gcpcs}
+                                        dynamodb={dynamodb}
                                         newConnectionValue={
                                           NEW_CONNECTION_VALUE
                                         }
@@ -374,36 +464,29 @@ export default function Page({ searchParams }: PageProps): ReactElement {
                         </Button>
                       </div>
                     </div>
-                    <DestinationOptionsForm
-                      connection={connections.find(
-                        (c) =>
-                          c.id ==
-                          form.getValues().destinations[index].connectionId
+                    <FormField
+                      control={form.control}
+                      name={`destinations.${index}.destinationOptions`}
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormControl>
+                            <DestinationOptionsForm
+                              connection={connections.find(
+                                (c) =>
+                                  c.id ==
+                                  form.getValues().destinations[index]
+                                    .connectionId
+                              )}
+                              value={field.value}
+                              setValue={(newOpts) => {
+                                field.onChange(newOpts);
+                              }}
+                              hideDynamoDbTableMappings={true}
+                              destinationDetailsRecord={{}} // not used beacause we are hiding dynamodb table mappings
+                            />
+                          </FormControl>
+                        </FormItem>
                       )}
-                      value={{
-                        initTableSchema: destOpts.initTableSchema ?? false,
-                        onConflictDoNothing:
-                          destOpts.onConflictDoNothing ?? false,
-                        truncateBeforeInsert:
-                          destOpts.truncateBeforeInsert ?? false,
-                        truncateCascade: destOpts.truncateCascade ?? false,
-                      }}
-                      setValue={(newOpts) => {
-                        form.setValue(
-                          `destinations.${index}.destinationOptions`,
-                          {
-                            initTableSchema: newOpts.initTableSchema,
-                            onConflictDoNothing: newOpts.onConflictDoNothing,
-                            truncateBeforeInsert: newOpts.truncateBeforeInsert,
-                            truncateCascade: newOpts.truncateCascade,
-                          },
-                          {
-                            shouldDirty: true,
-                            shouldTouch: true,
-                            shouldValidate: true,
-                          }
-                        );
-                      }}
                     />
                   </div>
                 );

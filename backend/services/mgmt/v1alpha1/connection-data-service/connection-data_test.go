@@ -23,13 +23,13 @@ import (
 
 	mysql_queries "github.com/nucleuscloud/neosync/backend/gen/go/db/dbschemas/mysql"
 	pg_queries "github.com/nucleuscloud/neosync/backend/gen/go/db/dbschemas/postgresql"
-	awsmanager "github.com/nucleuscloud/neosync/backend/internal/aws"
 	neosync_gcp "github.com/nucleuscloud/neosync/backend/internal/gcp"
 	"github.com/nucleuscloud/neosync/backend/internal/nucleusdb"
 	"github.com/nucleuscloud/neosync/backend/pkg/mongoconnect"
 	"github.com/nucleuscloud/neosync/backend/pkg/sqlconnect"
 	"github.com/nucleuscloud/neosync/backend/pkg/sqlmanager"
 	sqlmanager_shared "github.com/nucleuscloud/neosync/backend/pkg/sqlmanager/shared"
+	awsmanager "github.com/nucleuscloud/neosync/internal/aws"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 )
@@ -456,6 +456,14 @@ func Test_GetConnectionInitStatements_Mysql_Create(t *testing.T) {
 			DataType:    "character varying",
 		}}, nil)
 	m.DbMock.On("GetCreateTableStatement", mock.Anything, "public", "users").Return("CREATE TABLE IF NOT EXISTS  public.users;", nil)
+	m.DbMock.On("GetSchemaInitStatements", mock.Anything, mock.Anything).Return([]*sqlmanager_shared.InitSchemaStatements{
+		{Label: "data types", Statements: []string{}},
+		{Label: "create table", Statements: []string{"test-create-statement"}},
+		{Label: "non-fk alter table", Statements: []string{"test-pk-statement"}},
+		{Label: "fk alter table", Statements: []string{"test-fk-statement"}},
+		{Label: "table index", Statements: []string{"test-idx-statement"}},
+		{Label: "table triggers", Statements: []string{"test-trigger-statement"}},
+	}, nil)
 
 	resp, err := m.Service.GetConnectionInitStatements(context.Background(), &connect.Request[mgmtv1alpha1.GetConnectionInitStatementsRequest]{
 		Msg: &mgmtv1alpha1.GetConnectionInitStatementsRequest{

@@ -1339,7 +1339,7 @@
           "fields": [
             {
               "name": "id",
-              "description": "",
+              "description": "The unique identifier of the connection",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -1351,7 +1351,7 @@
             },
             {
               "name": "name",
-              "description": "",
+              "description": "The unique, friendly name of the connection",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -1363,7 +1363,7 @@
             },
             {
               "name": "connection_config",
-              "description": "",
+              "description": "Contains the connection configuration and connection type",
               "label": "",
               "type": "ConnectionConfig",
               "longType": "ConnectionConfig",
@@ -1375,7 +1375,7 @@
             },
             {
               "name": "created_by_user_id",
-              "description": "",
+              "description": "The user id of the user that created the connection",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -1387,7 +1387,7 @@
             },
             {
               "name": "created_at",
-              "description": "",
+              "description": "When the connection was created",
               "label": "",
               "type": "Timestamp",
               "longType": "google.protobuf.Timestamp",
@@ -1399,7 +1399,7 @@
             },
             {
               "name": "updated_by_user_id",
-              "description": "",
+              "description": "Who last updated the connection",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -1411,7 +1411,7 @@
             },
             {
               "name": "updated_at",
-              "description": "",
+              "description": "When the connection was last updated",
               "label": "",
               "type": "Timestamp",
               "longType": "google.protobuf.Timestamp",
@@ -1423,7 +1423,7 @@
             },
             {
               "name": "account_id",
-              "description": "",
+              "description": "The unique account that owns this connection",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -1524,6 +1524,18 @@
               "type": "GcpCloudStorageConnectionConfig",
               "longType": "GcpCloudStorageConnectionConfig",
               "fullType": "mgmt.v1alpha1.GcpCloudStorageConnectionConfig",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "config",
+              "defaultValue": ""
+            },
+            {
+              "name": "dynamodb_config",
+              "description": "Configures a DynamoDB Connection",
+              "label": "",
+              "type": "DynamoDBConnectionConfig",
+              "longType": "DynamoDBConnectionConfig",
+              "fullType": "mgmt.v1alpha1.DynamoDBConnectionConfig",
               "ismap": false,
               "isoneof": true,
               "oneofdecl": "config",
@@ -1697,6 +1709,54 @@
           "hasOneofs": false,
           "extensions": [],
           "fields": []
+        },
+        {
+          "name": "DynamoDBConnectionConfig",
+          "longName": "DynamoDBConnectionConfig",
+          "fullName": "mgmt.v1alpha1.DynamoDBConnectionConfig",
+          "description": "Configuration for a DynaomDB Connection",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": true,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "credentials",
+              "description": "Optional credentials that may be provided and will be used to connect to the DynamoDB Instance.\nIf self-hosting, this may be provided by the environment in lieu of specifying these here",
+              "label": "optional",
+              "type": "AwsS3Credentials",
+              "longType": "AwsS3Credentials",
+              "fullType": "mgmt.v1alpha1.AwsS3Credentials",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "_credentials",
+              "defaultValue": ""
+            },
+            {
+              "name": "region",
+              "description": "Optionally specify the region that the dynamodb instance lives in if not provided by the environment.",
+              "label": "optional",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "_region",
+              "defaultValue": ""
+            },
+            {
+              "name": "endpoint",
+              "description": "Optionally specify the endpoint that will be used by the AWS SDK.",
+              "label": "optional",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "_endpoint",
+              "defaultValue": ""
+            }
+          ]
         },
         {
           "name": "GcpCloudStorageConnectionConfig",
@@ -2834,6 +2894,18 @@
               "isoneof": true,
               "oneofdecl": "config",
               "defaultValue": ""
+            },
+            {
+              "name": "dynamodb_config",
+              "description": "",
+              "label": "",
+              "type": "DynamoDBSchemaConfig",
+              "longType": "DynamoDBSchemaConfig",
+              "fullType": "mgmt.v1alpha1.DynamoDBSchemaConfig",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "config",
+              "defaultValue": ""
             }
           ]
         },
@@ -3040,6 +3112,17 @@
               "defaultValue": ""
             }
           ]
+        },
+        {
+          "name": "DynamoDBSchemaConfig",
+          "longName": "DynamoDBSchemaConfig",
+          "fullName": "mgmt.v1alpha1.DynamoDBSchemaConfig",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": false,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": []
         },
         {
           "name": "ForeignConstraint",
@@ -3810,6 +3893,162 @@
           ]
         },
         {
+          "name": "GetConnectionSchemaMapRequest",
+          "longName": "GetConnectionSchemaMapRequest",
+          "fullName": "mgmt.v1alpha1.GetConnectionSchemaMapRequest",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "connection_id",
+              "description": "",
+              "label": "",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "schema_config",
+              "description": "",
+              "label": "",
+              "type": "ConnectionSchemaConfig",
+              "longType": "ConnectionSchemaConfig",
+              "fullType": "mgmt.v1alpha1.ConnectionSchemaConfig",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "GetConnectionSchemaMapResponse",
+          "longName": "GetConnectionSchemaMapResponse",
+          "fullName": "mgmt.v1alpha1.GetConnectionSchemaMapResponse",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "schema_map",
+              "description": "Returns the database columns separated by the fully qualified \u003cschema\u003e.\u003ctable\u003e",
+              "label": "repeated",
+              "type": "SchemaMapEntry",
+              "longType": "GetConnectionSchemaMapResponse.SchemaMapEntry",
+              "fullType": "mgmt.v1alpha1.GetConnectionSchemaMapResponse.SchemaMapEntry",
+              "ismap": true,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "SchemaMapEntry",
+          "longName": "GetConnectionSchemaMapResponse.SchemaMapEntry",
+          "fullName": "mgmt.v1alpha1.GetConnectionSchemaMapResponse.SchemaMapEntry",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "key",
+              "description": "",
+              "label": "",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "value",
+              "description": "",
+              "label": "",
+              "type": "GetConnectionSchemaResponse",
+              "longType": "GetConnectionSchemaResponse",
+              "fullType": "mgmt.v1alpha1.GetConnectionSchemaResponse",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "GetConnectionSchemaMapsRequest",
+          "longName": "GetConnectionSchemaMapsRequest",
+          "fullName": "mgmt.v1alpha1.GetConnectionSchemaMapsRequest",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "requests",
+              "description": "List of connection schema maps to request",
+              "label": "repeated",
+              "type": "GetConnectionSchemaMapRequest",
+              "longType": "GetConnectionSchemaMapRequest",
+              "fullType": "mgmt.v1alpha1.GetConnectionSchemaMapRequest",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "GetConnectionSchemaMapsResponse",
+          "longName": "GetConnectionSchemaMapsResponse",
+          "fullName": "mgmt.v1alpha1.GetConnectionSchemaMapsResponse",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "responses",
+              "description": "List of responses in the same order as the input",
+              "label": "repeated",
+              "type": "GetConnectionSchemaMapResponse",
+              "longType": "GetConnectionSchemaMapResponse",
+              "fullType": "mgmt.v1alpha1.GetConnectionSchemaMapResponse",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "connection_ids",
+              "description": "Parallel array of each connection id that matches with the response",
+              "label": "repeated",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
           "name": "GetConnectionSchemaRequest",
           "longName": "GetConnectionSchemaRequest",
           "fullName": "mgmt.v1alpha1.GetConnectionSchemaRequest",
@@ -4458,6 +4697,30 @@
               "responseType": "GetConnectionSchemaResponse",
               "responseLongType": "GetConnectionSchemaResponse",
               "responseFullType": "mgmt.v1alpha1.GetConnectionSchemaResponse",
+              "responseStreaming": false
+            },
+            {
+              "name": "GetConnectionSchemaMap",
+              "description": "Returns the schema in map format. The keys are the fully qualified table in the format \u003cschema\u003e.\u003ctable\u003e",
+              "requestType": "GetConnectionSchemaMapRequest",
+              "requestLongType": "GetConnectionSchemaMapRequest",
+              "requestFullType": "mgmt.v1alpha1.GetConnectionSchemaMapRequest",
+              "requestStreaming": false,
+              "responseType": "GetConnectionSchemaMapResponse",
+              "responseLongType": "GetConnectionSchemaMapResponse",
+              "responseFullType": "mgmt.v1alpha1.GetConnectionSchemaMapResponse",
+              "responseStreaming": false
+            },
+            {
+              "name": "GetConnectionSchemaMaps",
+              "description": "Returns the schema in map format for every request provided",
+              "requestType": "GetConnectionSchemaMapsRequest",
+              "requestLongType": "GetConnectionSchemaMapsRequest",
+              "requestFullType": "mgmt.v1alpha1.GetConnectionSchemaMapsRequest",
+              "requestStreaming": false,
+              "responseType": "GetConnectionSchemaMapsResponse",
+              "responseLongType": "GetConnectionSchemaMapsResponse",
+              "responseFullType": "mgmt.v1alpha1.GetConnectionSchemaMapsResponse",
               "responseStreaming": false
             },
             {
@@ -5448,10 +5711,23 @@
           "fullName": "mgmt.v1alpha1.GenerateState",
           "description": "",
           "hasExtensions": false,
-          "hasFields": false,
+          "hasFields": true,
           "hasOneofs": false,
           "extensions": [],
-          "fields": []
+          "fields": [
+            {
+              "name": "generate_full_name",
+              "description": "An option to return the full state name of the randomly selected state or return the default of a 2-letter state code.",
+              "label": "",
+              "type": "bool",
+              "longType": "bool",
+              "fullType": "bool",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
         },
         {
           "name": "GenerateStreetAddress",
@@ -7600,7 +7876,7 @@
           "fields": [
             {
               "name": "ai_connection_id",
-              "description": "",
+              "description": "The connection id that corresponds with an AI-based Neosync connection",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -7612,7 +7888,7 @@
             },
             {
               "name": "schemas",
-              "description": "",
+              "description": "The list of schemas (and their tables) along with any configuration options that will be used to generate data for.",
               "label": "repeated",
               "type": "AiGenerateSourceSchemaOption",
               "longType": "AiGenerateSourceSchemaOption",
@@ -7624,7 +7900,7 @@
             },
             {
               "name": "fk_source_connection_id",
-              "description": "",
+              "description": "An optional connection id that will be used as the basis for the shape of data to be generated.",
               "label": "optional",
               "type": "string",
               "longType": "string",
@@ -7657,6 +7933,18 @@
               "isoneof": true,
               "oneofdecl": "_user_prompt",
               "defaultValue": ""
+            },
+            {
+              "name": "generate_batch_size",
+              "description": "The batch size that will be used to generate X number of records. This is global and will be applied to all tables configured.",
+              "label": "optional",
+              "type": "int64",
+              "longType": "int64",
+              "fullType": "int64",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "_generate_batch_size",
+              "defaultValue": ""
             }
           ]
         },
@@ -7672,7 +7960,7 @@
           "fields": [
             {
               "name": "schema",
-              "description": "",
+              "description": "The dataabase schema",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -7684,7 +7972,7 @@
             },
             {
               "name": "tables",
-              "description": "",
+              "description": "The list of tables (and their configuration) that reside within the schema to receive generated data",
               "label": "repeated",
               "type": "AiGenerateSourceTableOption",
               "longType": "AiGenerateSourceTableOption",
@@ -7708,7 +7996,7 @@
           "fields": [
             {
               "name": "table",
-              "description": "",
+              "description": "The table that will be used to. 1. The schema of the table will be injected into the prompt, of which the resulting data will then be inserted.",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -7720,7 +8008,7 @@
             },
             {
               "name": "row_count",
-              "description": "",
+              "description": "The total number of records to be generated.",
               "label": "",
               "type": "int64",
               "longType": "int64",
@@ -8303,10 +8591,250 @@
           "fields": []
         },
         {
+          "name": "DynamoDBDestinationConnectionOptions",
+          "longName": "DynamoDBDestinationConnectionOptions",
+          "fullName": "mgmt.v1alpha1.DynamoDBDestinationConnectionOptions",
+          "description": "Configuration for DynamoDB Destination Connection Job Options",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "table_mappings",
+              "description": "List of table mappings when piping data from a dynamoDB table to another dynamoDB table",
+              "label": "repeated",
+              "type": "DynamoDBDestinationTableMapping",
+              "longType": "DynamoDBDestinationTableMapping",
+              "fullType": "mgmt.v1alpha1.DynamoDBDestinationTableMapping",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "DynamoDBDestinationTableMapping",
+          "longName": "DynamoDBDestinationTableMapping",
+          "fullName": "mgmt.v1alpha1.DynamoDBDestinationTableMapping",
+          "description": "Configuration for mapping a source table to a destination table for DynamoDB",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "source_table",
+              "description": "The name of the incoming source table",
+              "label": "",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "destination_table",
+              "description": "The name of the outgoing destination table",
+              "label": "",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "DynamoDBSourceConnectionOptions",
+          "longName": "DynamoDBSourceConnectionOptions",
+          "fullName": "mgmt.v1alpha1.DynamoDBSourceConnectionOptions",
+          "description": "DynamoDB connection options for a job source",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "connection_id",
+              "description": "The unique connection id to a dynamodb connection configuration",
+              "label": "",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "tables",
+              "description": "List of table option configurations for any mapped source table.\nAny table listed in this must also be present as a job mapping table to be applied.",
+              "label": "repeated",
+              "type": "DynamoDBSourceTableOption",
+              "longType": "DynamoDBSourceTableOption",
+              "fullType": "mgmt.v1alpha1.DynamoDBSourceTableOption",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "unmapped_transforms",
+              "description": "Default transformations for any unmapped keys",
+              "label": "",
+              "type": "DynamoDBSourceUnmappedTransformConfig",
+              "longType": "DynamoDBSourceUnmappedTransformConfig",
+              "fullType": "mgmt.v1alpha1.DynamoDBSourceUnmappedTransformConfig",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "enable_consistent_read",
+              "description": "Enforces strong read consistency\nFalse: Eventually Consistent Reads, True: Strongly Consistent Reads\nhttps://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html",
+              "label": "",
+              "type": "bool",
+              "longType": "bool",
+              "fullType": "bool",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "DynamoDBSourceSchemaSubset",
+          "longName": "DynamoDBSourceSchemaSubset",
+          "fullName": "mgmt.v1alpha1.DynamoDBSourceSchemaSubset",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "tables",
+              "description": "",
+              "label": "repeated",
+              "type": "DynamoDBSourceTableOption",
+              "longType": "DynamoDBSourceTableOption",
+              "fullType": "mgmt.v1alpha1.DynamoDBSourceTableOption",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "DynamoDBSourceTableOption",
+          "longName": "DynamoDBSourceTableOption",
+          "fullName": "mgmt.v1alpha1.DynamoDBSourceTableOption",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": true,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "table",
+              "description": "The table that this configuration will be applied to",
+              "label": "",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "where_clause",
+              "description": "An optional PartiQL query that may be used for subsetting the DynamoDB table.\nThis is not a parameterized query and must be valid. Intended to be everything after the WHERE keyword.",
+              "label": "optional",
+              "type": "string",
+              "longType": "string",
+              "fullType": "string",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "_where_clause",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
+          "name": "DynamoDBSourceUnmappedTransformConfig",
+          "longName": "DynamoDBSourceUnmappedTransformConfig",
+          "fullName": "mgmt.v1alpha1.DynamoDBSourceUnmappedTransformConfig",
+          "description": "",
+          "hasExtensions": false,
+          "hasFields": true,
+          "hasOneofs": false,
+          "extensions": [],
+          "fields": [
+            {
+              "name": "b",
+              "description": "Byte",
+              "label": "",
+              "type": "JobMappingTransformer",
+              "longType": "JobMappingTransformer",
+              "fullType": "mgmt.v1alpha1.JobMappingTransformer",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "boolean",
+              "description": "Boolean",
+              "label": "",
+              "type": "JobMappingTransformer",
+              "longType": "JobMappingTransformer",
+              "fullType": "mgmt.v1alpha1.JobMappingTransformer",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "n",
+              "description": "Number",
+              "label": "",
+              "type": "JobMappingTransformer",
+              "longType": "JobMappingTransformer",
+              "fullType": "mgmt.v1alpha1.JobMappingTransformer",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            },
+            {
+              "name": "s",
+              "description": "String",
+              "label": "",
+              "type": "JobMappingTransformer",
+              "longType": "JobMappingTransformer",
+              "fullType": "mgmt.v1alpha1.JobMappingTransformer",
+              "ismap": false,
+              "isoneof": false,
+              "oneofdecl": "",
+              "defaultValue": ""
+            }
+          ]
+        },
+        {
           "name": "GcpCloudStorageDestinationConnectionOptions",
           "longName": "GcpCloudStorageDestinationConnectionOptions",
           "fullName": "mgmt.v1alpha1.GcpCloudStorageDestinationConnectionOptions",
-          "description": "Configuration for Google Cloud Storage Connection Job Options",
+          "description": "Configuration for Google Cloud Storage Destination Connection Job Options",
           "hasExtensions": false,
           "hasFields": false,
           "hasOneofs": false,
@@ -9378,6 +9906,18 @@
               "isoneof": true,
               "oneofdecl": "config",
               "defaultValue": ""
+            },
+            {
+              "name": "dynamodb_options",
+              "description": "Destination Connection options for DynamoDB",
+              "label": "",
+              "type": "DynamoDBDestinationConnectionOptions",
+              "longType": "DynamoDBDestinationConnectionOptions",
+              "fullType": "mgmt.v1alpha1.DynamoDBDestinationConnectionOptions",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "config",
+              "defaultValue": ""
             }
           ]
         },
@@ -9978,6 +10518,18 @@
               "isoneof": true,
               "oneofdecl": "config",
               "defaultValue": ""
+            },
+            {
+              "name": "dynamodb",
+              "description": "",
+              "label": "",
+              "type": "DynamoDBSourceConnectionOptions",
+              "longType": "DynamoDBSourceConnectionOptions",
+              "fullType": "mgmt.v1alpha1.DynamoDBSourceConnectionOptions",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "config",
+              "defaultValue": ""
             }
           ]
         },
@@ -10010,6 +10562,18 @@
               "type": "MysqlSourceSchemaSubset",
               "longType": "MysqlSourceSchemaSubset",
               "fullType": "mgmt.v1alpha1.MysqlSourceSchemaSubset",
+              "ismap": false,
+              "isoneof": true,
+              "oneofdecl": "schemas",
+              "defaultValue": ""
+            },
+            {
+              "name": "dynamodb_subset",
+              "description": "",
+              "label": "",
+              "type": "DynamoDBSourceSchemaSubset",
+              "longType": "DynamoDBSourceSchemaSubset",
+              "fullType": "mgmt.v1alpha1.DynamoDBSourceSchemaSubset",
               "ismap": false,
               "isoneof": true,
               "oneofdecl": "schemas",
@@ -10068,7 +10632,7 @@
           "name": "MongoDBSourceConnectionOptions",
           "longName": "MongoDBSourceConnectionOptions",
           "fullName": "mgmt.v1alpha1.MongoDBSourceConnectionOptions",
-          "description": "",
+          "description": "MongoDB connection options for a job source",
           "hasExtensions": false,
           "hasFields": true,
           "hasOneofs": false,
@@ -10076,7 +10640,7 @@
           "fields": [
             {
               "name": "connection_id",
-              "description": "",
+              "description": "The unique connection id to a mongo connection configuration",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -10760,7 +11324,7 @@
           "fields": [
             {
               "name": "id",
-              "description": "",
+              "description": "The unique identifier of the job to update subsets for",
               "label": "",
               "type": "string",
               "longType": "string",
@@ -10772,7 +11336,7 @@
             },
             {
               "name": "schemas",
-              "description": "",
+              "description": "The subset configuration",
               "label": "",
               "type": "JobSourceSqlSubetSchemas",
               "longType": "JobSourceSqlSubetSchemas",
@@ -10784,7 +11348,7 @@
             },
             {
               "name": "subset_by_foreign_key_constraints",
-              "description": "",
+              "description": "Whether or not to have subsets follow foreign key constraints (for connections that support it)",
               "label": "",
               "type": "bool",
               "longType": "bool",

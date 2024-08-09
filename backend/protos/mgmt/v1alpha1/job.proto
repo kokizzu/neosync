@@ -26,6 +26,7 @@ message JobSourceOptions {
     GenerateSourceOptions generate = 4;
     AiGenerateSourceOptions ai_generate = 5;
     MongoDBSourceConnectionOptions mongodb = 6;
+    DynamoDBSourceConnectionOptions dynamodb = 7;
   }
 }
 
@@ -41,21 +42,33 @@ message JobDestination {
 }
 
 message AiGenerateSourceOptions {
+  // The connection id that corresponds with an AI-based Neosync connection
   string ai_connection_id = 1 [(buf.validate.field).string.uuid = true];
+  // The list of schemas (and their tables) along with any configuration options that will be used to generate data for.
   repeated AiGenerateSourceSchemaOption schemas = 2 [(buf.validate.field).repeated.min_items = 1];
+  // An optional connection id that will be used as the basis for the shape of data to be generated.
   optional string fk_source_connection_id = 3 [(buf.validate.field).string.uuid = true];
   // The name of the model to use
   string model_name = 4 [(buf.validate.field).string.min_len = 1];
   // Optionally provide a user prompt to give more context to the schema
   optional string user_prompt = 5;
+  // The batch size that will be used to generate X number of records. This is global and will be applied to all tables configured.
+  optional int64 generate_batch_size = 6 [
+    (buf.validate.field).int64.gte = 1,
+    (buf.validate.field).int64.lte = 100
+  ];
 }
 
 message AiGenerateSourceSchemaOption {
+  // The dataabase schema
   string schema = 1 [(buf.validate.field).string.min_len = 1];
+  // The list of tables (and their configuration) that reside within the schema to receive generated data
   repeated AiGenerateSourceTableOption tables = 2 [(buf.validate.field).repeated.min_items = 1];
 }
 message AiGenerateSourceTableOption {
+  // The table that will be used to. 1. The schema of the table will be injected into the prompt, of which the resulting data will then be inserted.
   string table = 1 [(buf.validate.field).string.min_len = 1];
+  // The total number of records to be generated.
   int64 row_count = 2 [
     (buf.validate.field).int64.gte = 1,
     (buf.validate.field).int64.lte = 1000
@@ -75,8 +88,44 @@ message GenerateSourceTableOption {
   int64 row_count = 2 [(buf.validate.field).int64.gte = 1];
 }
 
+// MongoDB connection options for a job source
 message MongoDBSourceConnectionOptions {
+  // The unique connection id to a mongo connection configuration
   string connection_id = 1 [(buf.validate.field).string.uuid = true];
+}
+
+// DynamoDB connection options for a job source
+message DynamoDBSourceConnectionOptions {
+  // The unique connection id to a dynamodb connection configuration
+  string connection_id = 1 [(buf.validate.field).string.uuid = true];
+  // List of table option configurations for any mapped source table.
+  // Any table listed in this must also be present as a job mapping table to be applied.
+  repeated DynamoDBSourceTableOption tables = 2;
+  // Default transformations for any unmapped keys
+  DynamoDBSourceUnmappedTransformConfig unmapped_transforms = 3;
+  // Enforces strong read consistency
+  // False: Eventually Consistent Reads, True: Strongly Consistent Reads
+  // https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html
+  bool enable_consistent_read = 4;
+}
+
+message DynamoDBSourceUnmappedTransformConfig {
+  // Byte
+  JobMappingTransformer b = 1;
+  // Boolean
+  JobMappingTransformer boolean = 2;
+  // Number
+  JobMappingTransformer n = 4;
+  // String
+  JobMappingTransformer s = 6;
+}
+
+message DynamoDBSourceTableOption {
+  // The table that this configuration will be applied to
+  string table = 1 [(buf.validate.field).string.min_len = 1];
+  // An optional PartiQL query that may be used for subsetting the DynamoDB table.
+  // This is not a parameterized query and must be valid. Intended to be everything after the WHERE keyword.
+  optional string where_clause = 2;
 }
 
 message PostgresSourceConnectionOptions {
@@ -124,13 +173,29 @@ message JobDestinationOptions {
     MongoDBDestinationConnectionOptions mongodb_options = 4;
     // Destination Connecton options for Google Cloud Storage
     GcpCloudStorageDestinationConnectionOptions gcp_cloudstorage_options = 5;
+    // Destination Connection options for DynamoDB
+    DynamoDBDestinationConnectionOptions dynamodb_options = 6;
   }
 }
 
 message MongoDBDestinationConnectionOptions {}
 
-// Configuration for Google Cloud Storage Connection Job Options
+// Configuration for Google Cloud Storage Destination Connection Job Options
 message GcpCloudStorageDestinationConnectionOptions {}
+
+// Configuration for DynamoDB Destination Connection Job Options
+message DynamoDBDestinationConnectionOptions {
+  // List of table mappings when piping data from a dynamoDB table to another dynamoDB table
+  repeated DynamoDBDestinationTableMapping table_mappings = 1;
+}
+
+// Configuration for mapping a source table to a destination table for DynamoDB
+message DynamoDBDestinationTableMapping {
+  // The name of the incoming source table
+  string source_table = 1;
+  // The name of the outgoing destination table
+  string destination_table = 2;
+}
 
 message PostgresDestinationConnectionOptions {
   PostgresTruncateTableConfig truncate_table = 1;
@@ -280,17 +345,25 @@ message MysqlSourceSchemaSubset {
   repeated MysqlSourceSchemaOption mysql_schemas = 1;
 }
 
+message DynamoDBSourceSchemaSubset {
+  repeated DynamoDBSourceTableOption tables = 1;
+}
+
 message JobSourceSqlSubetSchemas {
   oneof schemas {
     option (buf.validate.oneof).required = true;
     PostgresSourceSchemaSubset postgres_subset = 2;
     MysqlSourceSchemaSubset mysql_subset = 3;
+    DynamoDBSourceSchemaSubset dynamodb_subset = 4;
   }
 }
 
 message SetJobSourceSqlConnectionSubsetsRequest {
+  // The unique identifier of the job to update subsets for
   string id = 1 [(buf.validate.field).string.uuid = true];
+  // The subset configuration
   JobSourceSqlSubetSchemas schemas = 2;
+  // Whether or not to have subsets follow foreign key constraints (for connections that support it)
   bool subset_by_foreign_key_constraints = 3;
 }
 message SetJobSourceSqlConnectionSubsetsResponse {

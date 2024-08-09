@@ -1,6 +1,7 @@
 'use client';
 import SourceOptionsForm from '@/components/jobs/Form/SourceOptionsForm';
 import NosqlTable from '@/components/jobs/NosqlTable/NosqlTable';
+import { OnTableMappingUpdateRequest } from '@/components/jobs/NosqlTable/TableMappings/Columns';
 import {
   SchemaTable,
   getAllFormErrors,
@@ -24,29 +25,30 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useToast } from '@/components/ui/use-toast';
-import { getConnection } from '@/libs/hooks/useGetConnection';
-import {
-  ConnectionSchemaMap,
-  GetConnectionSchemaMapResponse,
-  getConnectionSchema,
-  useGetConnectionSchemaMap,
-} from '@/libs/hooks/useGetConnectionSchemaMap';
-import { useGetConnectionTableConstraints } from '@/libs/hooks/useGetConnectionTableConstraints';
-import { useGetConnections } from '@/libs/hooks/useGetConnections';
-import { useGetJob } from '@/libs/hooks/useGetJob';
-import { validateJobMapping } from '@/libs/requests/validateJobMappings';
 import { getErrorMessage } from '@/util/util';
 import {
-  SchemaFormValues,
-  SourceFormValues,
+  DataSyncSourceFormValues,
+  EditDestinationOptionsFormValues,
   VirtualForeignConstraintFormValues,
   convertJobMappingTransformerFormToJobMappingTransformer,
   convertJobMappingTransformerToForm,
 } from '@/yup-validations/jobs';
+import { PartialMessage } from '@bufbuild/protobuf';
+import {
+  createConnectQueryKey,
+  useMutation,
+  useQuery,
+} from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import {
   Connection,
+  DynamoDBSourceConnectionOptions,
+  DynamoDBSourceUnmappedTransformConfig,
+  GetConnectionResponse,
+  GetConnectionSchemaMapRequest,
+  GetConnectionSchemaMapResponse,
+  GetConnectionSchemaMapsResponse,
+  GetConnectionSchemaResponse,
   Job,
   JobMapping,
   JobMappingTransformer,
@@ -55,29 +57,43 @@ import {
   MongoDBSourceConnectionOptions,
   MysqlSourceConnectionOptions,
   PostgresSourceConnectionOptions,
-  UpdateJobSourceConnectionRequest,
-  UpdateJobSourceConnectionResponse,
   ValidateJobMappingsResponse,
   VirtualForeignConstraint,
   VirtualForeignKey,
 } from '@neosync/sdk';
-import { ReactElement, useEffect, useMemo, useState } from 'react';
+import {
+  getConnection,
+  getConnectionSchemaMap,
+  getConnectionSchemaMaps,
+  getConnectionTableConstraints,
+  getConnections,
+  getJob,
+  updateJobDestinationConnection,
+  updateJobSourceConnection,
+  validateJobMappings,
+} from '@neosync/sdk/connectquery';
+import { useQueryClient } from '@tanstack/react-query';
+import { ReactElement, useCallback, useEffect, useMemo, useState } from 'react';
 import { useFieldArray, useForm } from 'react-hook-form';
-import { KeyedMutator } from 'swr';
-import * as Yup from 'yup';
+import { toast } from 'sonner';
+import {
+  getDefaultUnmappedTransformConfig,
+  toDynamoDbSourceUnmappedOptionsFormValues,
+  validateJobMapping,
+} from '../../../util';
 import SchemaPageSkeleton from './SchemaPageSkeleton';
-import { getOnSelectedTableToggle } from './util';
+import {
+  getDestinationDetailsRecord,
+  getDynamoDbDestinations,
+  getOnSelectedTableToggle,
+  isDynamoDBConnection,
+  isNosqlSource,
+  shouldShowDestinationTableMappings,
+} from './util';
 
 interface Props {
   jobId: string;
 }
-
-const FORM_SCHEMA = SourceFormValues.concat(
-  Yup.object({
-    destinationIds: Yup.array().of(Yup.string().required()),
-  })
-).concat(SchemaFormValues);
-type SourceFormValues = Yup.InferType<typeof FORM_SCHEMA>;
 
 function getConnectionIdFromSource(
   js: JobSource | undefined
@@ -86,7 +102,8 @@ function getConnectionIdFromSource(
     js?.options?.config.case === 'postgres' ||
     js?.options?.config.case === 'mysql' ||
     js?.options?.config.case === 'awsS3' ||
-    js?.options?.config.case === 'mongodb'
+    js?.options?.config.case === 'mongodb' ||
+    js?.options?.config.case === 'dynamodb'
   ) {
     return js.options.config.value.connectionId;
   }
@@ -94,25 +111,65 @@ function getConnectionIdFromSource(
 }
 
 export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
-  const { toast } = useToast();
   const { account } = useAccount();
   const {
     data,
-    mutate,
+    refetch: mutate,
     isLoading: isJobDataLoading,
-  } = useGetJob(account?.id ?? '', jobId);
+  } = useQuery(getJob, { id: jobId }, { enabled: !!jobId });
   const sourceConnectionId = getConnectionIdFromSource(data?.job?.source);
 
   const {
     data: connectionSchemaDataMap,
     isLoading: isSchemaDataMapLoading,
-    isValidating: isSchemaMapValidating,
-    mutate: mutateGetConnectionSchemaMap,
-  } = useGetConnectionSchemaMap(account?.id ?? '', sourceConnectionId ?? '');
+    isFetching: isSchemaMapValidating,
+  } = useQuery(
+    getConnectionSchemaMap,
+    { connectionId: sourceConnectionId },
+    { enabled: !!sourceConnectionId }
+  );
+  const { mutateAsync: getConnectionSchemaMapAsync } = useMutation(
+    getConnectionSchemaMap
+  );
 
-  const { isLoading: isConnectionsLoading, data: connectionsData } =
-    useGetConnections(account?.id ?? '');
+  const { data: destinationConnectionSchemaMapsResp } = useQuery(
+    getConnectionSchemaMaps,
+    {
+      requests: data?.job?.destinations.map(
+        (dest): PartialMessage<GetConnectionSchemaMapRequest> => ({
+          connectionId: dest.connectionId,
+        })
+      ),
+    },
+    {
+      enabled:
+        (data?.job?.destinations.length ?? 0) > 0 &&
+        data?.job?.source?.options?.config.case === 'dynamodb',
+    }
+  );
+
+  const { isLoading: isConnectionsLoading, data: connectionsData } = useQuery(
+    getConnections,
+    { accountId: account?.id },
+    { enabled: !!account?.id }
+  );
   const connections = connectionsData?.connections ?? [];
+  const connectionsRecord = connections.reduce(
+    (record, conn) => {
+      record[conn.id] = conn;
+      return record;
+    },
+    {} as Record<string, Connection>
+  );
+
+  const { mutateAsync: updateJobSrcConnection } = useMutation(
+    updateJobSourceConnection
+  );
+  const { mutateAsync: updateJobDestConnection } = useMutation(
+    updateJobDestinationConnection
+  );
+
+  const queryclient = useQueryClient();
 
   const [validateMappingsResponse, setValidateMappingsResponse] = useState<
     ValidateJobMappingsResponse | undefined
@@ -120,21 +177,31 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
 
   const [isValidatingMappings, setIsValidatingMappings] = useState(false);
 
-  const form = useForm<SourceFormValues>({
-    resolver: yupResolver<SourceFormValues>(FORM_SCHEMA),
+  const form = useForm<DataSyncSourceFormValues>({
+    resolver: yupResolver<DataSyncSourceFormValues>(DataSyncSourceFormValues),
     values: getJobSource(data?.job, connectionSchemaDataMap?.schemaMap),
     context: { accountId: account?.id },
   });
-  const formVirtualForeignKeys = form.watch('virtualForeignKeys');
 
-  const { data: tableConstraints, isValidating: isTableConstraintsValidating } =
-    useGetConnectionTableConstraints(
-      account?.id ?? '',
-      sourceConnectionId ?? ''
+  const { data: tableConstraints, isFetching: isTableConstraintsValidating } =
+    useQuery(
+      getConnectionTableConstraints,
+      { connectionId: sourceConnectionId },
+      { enabled: !!sourceConnectionId }
     );
+  const { mutateAsync: getConnectionAsync } = useMutation(getConnection);
+
+  const {
+    append: appendVfk,
+    remove: removeVfk,
+    fields: formVirtualForeignKeys,
+  } = useFieldArray({
+    control: form.control,
+    name: 'virtualForeignKeys',
+  });
 
   const schemaConstraintHandler = useMemo(() => {
-    const virtualForeignKeys = data?.job?.virtualForeignKeys ?? [];
+    const virtualForeignKeys = Array.from(data?.job?.virtualForeignKeys ?? []);
     formVirtualForeignKeys?.forEach((v) => {
       virtualForeignKeys.push(
         new VirtualForeignConstraint({
@@ -161,20 +228,19 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
     isSchemaMapValidating,
     isTableConstraintsValidating,
     isJobDataLoading,
-    formVirtualForeignKeys,
+    formVirtualForeignKeys, // this is kinda dangerous
   ]);
   const [selectedTables, setSelectedTables] = useState<Set<string>>(new Set());
 
-  const { append, remove, update, fields } = useFieldArray<SourceFormValues>({
+  const {
+    append,
+    remove,
+    update,
+    fields: formMappings,
+  } = useFieldArray({
     control: form.control,
     name: 'mappings',
   });
-
-  const { append: appendVfk, remove: removeVfk } =
-    useFieldArray<SourceFormValues>({
-      control: form.control,
-      name: 'virtualForeignKeys',
-    });
 
   useEffect(() => {
     if (isJobDataLoading || isSchemaDataMapLoading || selectedTables.size > 0) {
@@ -188,48 +254,126 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
     );
   }, [isJobDataLoading, isSchemaDataMapLoading]);
 
+  const { mutateAsync: validateJobMappingsAsync } =
+    useMutation(validateJobMappings);
+
   async function onSourceChange(value: string): Promise<void> {
     try {
       const newValues = await getUpdatedValues(
-        account?.id ?? '',
         value,
         form.getValues(),
-        mutateGetConnectionSchemaMap
+        async (id) => {
+          const resp = await getConnectionAsync({ id });
+          queryclient.setQueryData(
+            createConnectQueryKey(getConnection, { id }),
+            resp
+          );
+          return resp;
+        },
+        async (id) => {
+          const resp = await getConnectionSchemaMapAsync({ connectionId: id });
+          queryclient.setQueryData(
+            createConnectQueryKey(getConnectionSchemaMap, { connectionId: id }),
+            resp
+          );
+          return resp;
+        }
       );
       form.reset(newValues);
     } catch (err) {
       form.reset({ ...form.getValues(), mappings: [], sourceId: value });
-      toast({
-        title: 'Unable to get connection schema',
+      toast.error('Unable to get connection schema', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
 
-  async function onSubmit(values: SourceFormValues) {
+  async function onSubmit(values: DataSyncSourceFormValues) {
     const connection = connections.find((c) => c.id === values.sourceId);
     const job = data?.job;
     if (!job || !connection) {
       return;
     }
     try {
-      await updateJobConnection(account?.id ?? '', job, values, connection);
-      toast({
-        title: 'Successfully updated job source connection!',
-        variant: 'success',
+      await updateJobSrcConnection({
+        id: job.id,
+        mappings: values.mappings.map((m) => {
+          return new JobMapping({
+            schema: m.schema,
+            table: m.table,
+            column: m.column,
+            transformer:
+              convertJobMappingTransformerFormToJobMappingTransformer(
+                m.transformer
+              ),
+          });
+        }),
+        virtualForeignKeys:
+          values.virtualForeignKeys?.map((v) => {
+            return new VirtualForeignConstraint({
+              schema: v.schema,
+              table: v.table,
+              columns: v.columns,
+              foreignKey: new VirtualForeignKey({
+                schema: v.foreignKey.schema,
+                table: v.foreignKey.table,
+                columns: v.foreignKey.columns,
+              }),
+            });
+          }) || [],
+        source: new JobSource({
+          options: toJobSourceOptions(values, job, connection, values.sourceId),
+        }),
       });
+      toast.success('Successfully updated source connection!');
+      // hold off on mutating until after we update the job dest connections for dynamo conns
+      if (connection.connectionConfig?.config.case !== 'dynamodbConfig') {
+        mutate();
+      }
+    } catch (err) {
+      console.error(err);
+      toast.error('Unable to update job source connnection', {
+        description: getErrorMessage(err),
+      });
+      return;
+    }
+    if (connection.connectionConfig?.config.case !== 'dynamodbConfig') {
+      return;
+    }
+    try {
+      const destIdToConnId = new Map(
+        data?.job?.destinations.map((d) => [d.id, d.connectionId])
+      );
+      await Promise.all(
+        values.destinationOptions.map(async (destOpts) => {
+          if (!destOpts.dynamodb) {
+            return;
+          }
+          return updateJobDestConnection({
+            destinationId: destOpts.destinationId,
+            jobId: data?.job?.id,
+            connectionId: destIdToConnId.get(destOpts.destinationId),
+            options: {
+              config: {
+                case: 'dynamodbOptions',
+                value: {
+                  tableMappings: destOpts.dynamodb.tableMappings ?? [],
+                },
+              },
+            },
+          });
+        })
+      );
+      toast.success('Successfully updated job destination connection(s)');
       mutate();
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to update job source connection',
+      toast.error('Unable to update one or all job destination connections', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
-  const formMappings = form.watch('mappings');
+
   async function validateMappings() {
     try {
       setIsValidatingMappings(true);
@@ -237,14 +381,14 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
         sourceConnectionId || '',
         formMappings,
         account?.id || '',
-        formVirtualForeignKeys
+        formVirtualForeignKeys,
+        validateJobMappingsAsync
       );
       setValidateMappingsResponse(res);
     } catch (error) {
       console.error('Failed to validate job mappings:', error);
-      toast({
-        title: 'Unable to validate job mappings',
-        variant: 'destructive',
+      toast.error('Unable to validate job mappings', {
+        description: getErrorMessage(error),
       });
     } finally {
       setIsValidatingMappings(false);
@@ -260,14 +404,14 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
         sourceConnectionId || '',
         formMappings,
         account?.id || '',
-        vfks
+        vfks,
+        validateJobMappingsAsync
       );
       setValidateMappingsResponse(res);
     } catch (error) {
       console.error('Failed to validate virtual foreign keys:', error);
-      toast({
-        title: 'Unable to validate virtual foreign keys',
-        variant: 'destructive',
+      toast.error('Unable to validate virtual foreign keys', {
+        description: getErrorMessage(error),
       });
     } finally {
       setIsValidatingMappings(false);
@@ -278,17 +422,20 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
     connectionSchemaDataMap?.schemaMap ?? {},
     selectedTables,
     setSelectedTables,
-    fields,
+    formMappings,
     remove,
     append
   );
 
   useEffect(() => {
+    if (!account?.id || !sourceConnectionId) {
+      return;
+    }
     const validateJobMappings = async () => {
       await validateMappings();
     };
     validateJobMappings();
-  }, [selectedTables]);
+  }, [selectedTables, account?.id, sourceConnectionId]);
 
   async function addVirtualForeignKey(vfk: VirtualForeignConstraintFormValues) {
     appendVfk(vfk);
@@ -307,11 +454,35 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
     await validateVirtualForeignKeys(newVfks);
   }
 
+  const onDestinationTableMappingUpdate = useCallback(
+    (req: OnTableMappingUpdateRequest) => {
+      const destOpts = form.getValues('destinationOptions');
+      const destOpt = destOpts.find(
+        (d) => d.destinationId === req.destinationId
+      );
+      const tm = destOpt?.dynamodb?.tableMappings.find(
+        (tm) => tm.sourceTable === req.souceName
+      );
+      if (tm) {
+        tm.destinationTable = req.tableName;
+        form.setValue('destinationOptions', destOpts);
+      }
+      return;
+    },
+    []
+  );
+
   if (isConnectionsLoading || isSchemaDataMapLoading || isJobDataLoading) {
     return <SchemaPageSkeleton />;
   }
 
-  const source = connections.find((item) => item.id === sourceConnectionId);
+  const source = connectionsRecord[sourceConnectionId ?? ''] as
+    | Connection
+    | undefined;
+
+  const dynamoDBDestinations = getDynamoDbDestinations(
+    data?.job?.destinations ?? []
+  );
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -343,7 +514,9 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
                       {connections
                         .filter(
                           (c) =>
-                            !form.getValues().destinationIds?.includes(c.id) &&
+                            !data?.job?.destinations
+                              .map((d) => d.connectionId)
+                              ?.includes(c.id) &&
                             c.connectionConfig?.config.case !== 'awsS3Config' &&
                             c.connectionConfig?.config.case !==
                               'openaiConfig' &&
@@ -371,11 +544,20 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
             connection={connections.find(
               (c) => c.id === form.getValues().sourceId
             )}
+            value={form.watch('sourceOptions')}
+            setValue={(newOpts) => {
+              form.setValue('sourceOptions', newOpts, {
+                shouldDirty: true,
+                shouldTouch: true,
+                shouldValidate: true,
+              });
+            }}
           />
 
           {isNosqlSource(source ?? new Connection()) && (
             <NosqlTable
               data={formMappings}
+              destinationOptions={form.watch('destinationOptions')}
               schema={connectionSchemaDataMap?.schemaMap ?? {}}
               isSchemaDataReloading={isSchemaMapValidating}
               isJobMappingsValidating={isValidatingMappings}
@@ -403,6 +585,44 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
                 if (toRemove.length > 0) {
                   remove(toRemove);
                 }
+
+                if (!source || isDynamoDBConnection(source)) {
+                  return;
+                }
+
+                const toRemoveSet = new Set(toRemove);
+                const remainingTables = formMappings
+                  .filter((_, idx) => !toRemoveSet.has(idx))
+                  .map((fm) => fm.table);
+
+                // Check and update destinationOptions if needed
+                const destOpts = form.getValues('destinationOptions');
+                const updatedDestOpts = destOpts
+                  .map((opt) => {
+                    if (opt.dynamodb) {
+                      const updatedTableMappings =
+                        opt.dynamodb.tableMappings.filter((tm) => {
+                          // Check if any columns remain for the table
+                          const tableColumnsExist = remainingTables.some(
+                            (table) => table === tm.sourceTable
+                          );
+                          return tableColumnsExist;
+                        });
+
+                      return {
+                        ...opt,
+                        dynamoDb: {
+                          ...opt.dynamodb,
+                          tableMappings: updatedTableMappings,
+                        },
+                      };
+                    }
+                    return opt;
+                  })
+                  .filter(
+                    (opt) => (opt.dynamodb?.tableMappings.length ?? 0) > 0
+                  );
+                form.setValue('destinationOptions', updatedDestOpts);
               }}
               onEditMappings={(values) => {
                 const valuesMap = new Map(
@@ -434,7 +654,77 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
                     };
                   })
                 );
+                const uniqueCollections = Array.from(
+                  new Set(values.map((v) => v.collection))
+                );
+
+                const destOpts = form.getValues('destinationOptions');
+                const existing = new Map(
+                  destOpts.map((d) => [d.destinationId, d])
+                );
+                const updated = dynamoDBDestinations.map(
+                  (dest): EditDestinationOptionsFormValues => {
+                    const opt = existing.get(dest.id);
+                    if (opt) {
+                      const sourceSet = new Set(
+                        opt.dynamodb?.tableMappings.map(
+                          (mapping) => mapping.sourceTable
+                        ) ?? []
+                      );
+
+                      // Add missing uniqueCollections to the existing tableMappings
+                      const updatedTableMappings = [
+                        ...(opt.dynamodb?.tableMappings ?? []),
+                        ...uniqueCollections
+                          .map((c) => {
+                            const [, table] = c.split('.');
+                            return {
+                              sourceTable: table,
+                              destinationTable: '',
+                            };
+                          })
+                          .filter(
+                            (mapping) => !sourceSet.has(mapping.sourceTable)
+                          ),
+                      ];
+
+                      return {
+                        ...opt,
+                        dynamodb: {
+                          ...opt.dynamodb,
+                          tableMappings: updatedTableMappings,
+                        },
+                      };
+                    }
+
+                    return {
+                      destinationId: dest.id,
+                      dynamodb: {
+                        tableMappings: uniqueCollections.map((c) => {
+                          const [, table] = c.split('.');
+                          return {
+                            sourceTable: table,
+                            destinationTable: '',
+                          };
+                        }),
+                      },
+                    };
+                  }
+                );
+
+                form.setValue('destinationOptions', updated);
               }}
+              destinationDetailsRecord={getDestinationDetailsRecord(
+                dynamoDBDestinations,
+                connectionsRecord,
+                destinationConnectionSchemaMapsResp ??
+                  new GetConnectionSchemaMapsResponse()
+              )}
+              onDestinationTableMappingUpdate={onDestinationTableMappingUpdate}
+              showDestinationTableMappings={shouldShowDestinationTableMappings(
+                source ?? new Connection(),
+                dynamoDBDestinations.length > 0
+              )}
             />
           )}
 
@@ -468,67 +758,8 @@ export default function DataSyncConnectionCard({ jobId }: Props): ReactElement {
   );
 }
 
-async function updateJobConnection(
-  accountId: string,
-  job: Job,
-  values: SourceFormValues,
-  connection: Connection
-): Promise<UpdateJobSourceConnectionResponse> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/${job.id}/source-connection`,
-    {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(
-        new UpdateJobSourceConnectionRequest({
-          id: job.id,
-          mappings: values.mappings.map((m) => {
-            return new JobMapping({
-              schema: m.schema,
-              table: m.table,
-              column: m.column,
-              transformer:
-                convertJobMappingTransformerFormToJobMappingTransformer(
-                  m.transformer
-                ),
-            });
-          }),
-          virtualForeignKeys:
-            values.virtualForeignKeys?.map((v) => {
-              return new VirtualForeignConstraint({
-                schema: v.schema,
-                table: v.table,
-                columns: v.columns,
-                foreignKey: new VirtualForeignKey({
-                  schema: v.foreignKey.schema,
-                  table: v.foreignKey.table,
-                  columns: v.foreignKey.columns,
-                }),
-              });
-            }) || [],
-          source: new JobSource({
-            options: toJobSourceOptions(
-              values,
-              job,
-              connection,
-              values.sourceId
-            ),
-          }),
-        })
-      ),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return UpdateJobSourceConnectionResponse.fromJson(await res.json());
-}
-
 function toJobSourceOptions(
-  values: SourceFormValues,
+  values: DataSyncSourceFormValues,
   job: Job,
   connection: Connection,
   newSourceId: string
@@ -542,7 +773,7 @@ function toJobSourceOptions(
             ...getExistingPostgresSourceConnectionOptions(job),
             connectionId: newSourceId,
             haltOnNewColumnAddition:
-              values.sourceOptions.haltOnNewColumnAddition,
+              values.sourceOptions.postgres?.haltOnNewColumnAddition,
           }),
         },
       });
@@ -554,7 +785,7 @@ function toJobSourceOptions(
             ...getExistingMysqlSourceConnectionOptions(job),
             connectionId: newSourceId,
             haltOnNewColumnAddition:
-              values.sourceOptions.haltOnNewColumnAddition,
+              values.sourceOptions.mysql?.haltOnNewColumnAddition,
           }),
         },
       });
@@ -568,6 +799,43 @@ function toJobSourceOptions(
           }),
         },
       });
+    case 'dynamodbConfig': {
+      return new JobSourceOptions({
+        config: {
+          case: 'dynamodb',
+          value: new DynamoDBSourceConnectionOptions({
+            ...getExistingDynamoDBSourceConnectionOptions(job),
+            connectionId: newSourceId,
+            unmappedTransforms: new DynamoDBSourceUnmappedTransformConfig({
+              b: values.sourceOptions.dynamodb?.unmappedTransformConfig?.byte
+                ? convertJobMappingTransformerFormToJobMappingTransformer(
+                    values.sourceOptions.dynamodb.unmappedTransformConfig.byte
+                  )
+                : undefined,
+              boolean: values.sourceOptions.dynamodb?.unmappedTransformConfig
+                ?.boolean
+                ? convertJobMappingTransformerFormToJobMappingTransformer(
+                    values.sourceOptions.dynamodb.unmappedTransformConfig
+                      .boolean
+                  )
+                : undefined,
+              n: values.sourceOptions.dynamodb?.unmappedTransformConfig?.n
+                ? convertJobMappingTransformerFormToJobMappingTransformer(
+                    values.sourceOptions.dynamodb.unmappedTransformConfig.n
+                  )
+                : undefined,
+              s: values.sourceOptions.dynamodb?.unmappedTransformConfig?.s
+                ? convertJobMappingTransformerFormToJobMappingTransformer(
+                    values.sourceOptions.dynamodb.unmappedTransformConfig.s
+                  )
+                : undefined,
+            }),
+            enableConsistentRead:
+              values.sourceOptions.dynamodb?.enableConsistentRead,
+          }),
+        },
+      });
+    }
     default:
       throw new Error('unsupported connection type');
   }
@@ -597,20 +865,26 @@ function getExistingMongoSourceConnectionOptions(
     : undefined;
 }
 
+function getExistingDynamoDBSourceConnectionOptions(
+  job: Job
+): DynamoDBSourceConnectionOptions | undefined {
+  return job.source?.options?.config.case === 'dynamodb'
+    ? job.source.options.config.value
+    : undefined;
+}
+
 function getJobSource(
   job?: Job,
-  connSchemaMap?: ConnectionSchemaMap
-): SourceFormValues {
+  connSchemaMap?: Record<string, GetConnectionSchemaResponse>
+): DataSyncSourceFormValues {
   if (!job || !connSchemaMap) {
     return {
       sourceId: '',
-      sourceOptions: {
-        haltOnNewColumnAddition: false,
-      },
-      destinationIds: [],
+      sourceOptions: {},
       mappings: [],
       virtualForeignKeys: [],
       connectionId: '',
+      destinationOptions: [],
     };
   }
 
@@ -653,7 +927,7 @@ function getJobSource(
       if (!dbcols) {
         return;
       }
-      dbcols.forEach((dbcol) => {
+      dbcols.schemas.forEach((dbcol) => {
         if (!currcols.has(dbcol.column)) {
           mappings.push({
             schema: dbcol.schema,
@@ -668,10 +942,8 @@ function getJobSource(
     });
   }
 
-  const destinationIds = job?.destinations.map((d) => d.connectionId);
   const values = {
     sourceOptions: {},
-    destinationIds: destinationIds,
     mappings: mappings || [],
     virtualForeignKeys: virtualForeignKeys || [],
   };
@@ -680,6 +952,7 @@ function getJobSource(
     sourceId: getConnectionIdFromSource(job.source) || '',
     mappings,
     connectionId: getConnectionIdFromSource(job.source) || '',
+    destinationOptions: [],
   };
 
   switch (job?.source?.options?.config.case) {
@@ -688,8 +961,10 @@ function getJobSource(
         ...yupValidationValues,
         sourceId: getConnectionIdFromSource(job.source) || '',
         sourceOptions: {
-          haltOnNewColumnAddition:
-            job?.source?.options?.config.value.haltOnNewColumnAddition,
+          postgres: {
+            haltOnNewColumnAddition:
+              job?.source?.options?.config.value.haltOnNewColumnAddition,
+          },
         },
       };
     case 'mysql':
@@ -697,8 +972,10 @@ function getJobSource(
         ...yupValidationValues,
         sourceId: getConnectionIdFromSource(job.source) || '',
         sourceOptions: {
-          haltOnNewColumnAddition:
-            job?.source?.options?.config.value.haltOnNewColumnAddition,
+          mysql: {
+            haltOnNewColumnAddition:
+              job?.source?.options?.config.value.haltOnNewColumnAddition,
+          },
         },
       };
     case 'mongodb':
@@ -707,22 +984,50 @@ function getJobSource(
         sourceId: getConnectionIdFromSource(job.source) || '',
         sourceOptions: {},
       };
+    case 'dynamodb': {
+      const destOpts: EditDestinationOptionsFormValues[] = [];
+      job.destinations.forEach((d) => {
+        if (d.options?.config.case !== 'dynamodbOptions') {
+          return;
+        }
+        destOpts.push({
+          destinationId: d.id,
+          dynamodb: {
+            tableMappings: d.options.config.value.tableMappings ?? [],
+          },
+        });
+      });
+      return {
+        ...yupValidationValues,
+        sourceId: getConnectionIdFromSource(job.source) || '',
+        sourceOptions: {
+          dynamodb: {
+            unmappedTransformConfig: toDynamoDbSourceUnmappedOptionsFormValues(
+              job.source?.options?.config?.value.unmappedTransforms
+            ),
+            enableConsistentRead:
+              job.source.options.config.value.enableConsistentRead,
+          },
+        },
+        destinationOptions: destOpts,
+      };
+    }
     default:
       return yupValidationValues;
   }
 }
 
 async function getUpdatedValues(
-  accountId: string,
   connectionId: string,
-  originalValues: SourceFormValues,
-  mutateConnectionSchemaRes:
-    | KeyedMutator<unknown>
-    | KeyedMutator<GetConnectionSchemaMapResponse>
-): Promise<SourceFormValues> {
+  originalValues: DataSyncSourceFormValues,
+  getConnectionById: (id: string) => Promise<GetConnectionResponse>,
+  getConnectionSchemaMapAsync: (
+    id: string
+  ) => Promise<GetConnectionSchemaMapResponse>
+): Promise<DataSyncSourceFormValues> {
   const [schemaRes, connRes] = await Promise.all([
-    getConnectionSchema(accountId, connectionId),
-    getConnection(accountId, connectionId),
+    getConnectionSchemaMapAsync(connectionId),
+    getConnectionById(connectionId),
   ]);
 
   if (!schemaRes || !connRes) {
@@ -731,7 +1036,9 @@ async function getUpdatedValues(
 
   const sameKeys = new Set(
     Object.values(schemaRes.schemaMap).flatMap((dbcols) =>
-      dbcols.map((dbcol) => `${dbcol.schema}.${dbcol.table}.${dbcol.column}`)
+      dbcols.schemas.map(
+        (dbcol) => `${dbcol.schema}.${dbcol.table}.${dbcol.column}`
+      )
     )
   );
 
@@ -742,31 +1049,43 @@ async function getUpdatedValues(
   const values = {
     sourceId: connectionId || '',
     sourceOptions: {},
-    destinationIds: originalValues.destinationIds,
     mappings,
     connectionId: connectionId || '',
+    destinationOptions: [],
   };
-  mutateConnectionSchemaRes(schemaRes);
 
   switch (connRes.connection?.connectionConfig?.config.case) {
     case 'pgConfig':
       return {
         ...values,
         sourceOptions: {
-          haltOnNewColumnAddition: false,
+          postgres: {
+            haltOnNewColumnAddition: false,
+          },
         },
       };
+    case 'mysqlConfig': {
+      return {
+        ...values,
+        sourceOptions: {
+          mysql: {
+            haltOnNewColumnAddition: false,
+          },
+        },
+      };
+    }
+    case 'dynamodbConfig': {
+      return {
+        ...values,
+        sourceOptions: {
+          dynamodb: {
+            unmappedTransformConfig: getDefaultUnmappedTransformConfig(),
+            enableConsistentRead: false,
+          },
+        },
+      };
+    }
     default:
       return values;
-  }
-}
-
-function isNosqlSource(connection: Connection): boolean {
-  switch (connection.connectionConfig?.config.case) {
-    case 'mongoConfig':
-      return true;
-    default: {
-      return false;
-    }
   }
 }

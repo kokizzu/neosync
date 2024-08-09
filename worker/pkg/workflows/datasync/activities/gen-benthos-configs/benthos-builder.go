@@ -18,9 +18,6 @@ import (
 )
 
 const (
-	generateDefault            = "generate_default"
-	passthrough                = "passthrough"
-	dbDefault                  = "DEFAULT"
 	jobmappingSubsetErrMsg     = "job mappings are not equal to or a subset of the database schema found in the source connection"
 	haltOnSchemaAdditionErrMsg = "job mappings does not contain a column mapping for all " +
 		"columns found in the source connection for the selected schemas and tables"
@@ -111,6 +108,12 @@ func (b *benthosBuilder) GenerateBenthosConfigs(
 			return nil, fmt.Errorf("unable to build benthos mongo sync source config responses: %w", err)
 		}
 		responses = append(responses, resp.BenthosConfigs...)
+	case *mgmtv1alpha1.JobSourceOptions_Dynamodb:
+		resp, err := b.getDynamoDbSyncBenthosConfigResponses(ctx, job, slogger)
+		if err != nil {
+			return nil, fmt.Errorf("unable to build benthos dynamodb sync source config responses: %w", err)
+		}
+		responses = append(responses, resp.BenthosConfigs...)
 	default:
 		return nil, fmt.Errorf("unsupported job source: %T", job.GetSource().GetOptions().GetConfig())
 	}
@@ -189,6 +192,43 @@ func (b *benthosBuilder) GenerateBenthosConfigs(
 				} else {
 					return nil, errors.New("unable to build destination connection due to unsupported source connection")
 				}
+			case *mgmtv1alpha1.ConnectionConfig_DynamodbConfig:
+				if resp.Config.Input.AwsDynamoDB == nil {
+					return nil, errors.New("unable to build destination connection due to unsupported source connection for dynamodb")
+				}
+				dynamoDestinationOpts := destination.GetOptions().GetDynamodbOptions()
+				if dynamoDestinationOpts == nil {
+					return nil, errors.New("destination must have configured dyanmodb options")
+				}
+				tableMap := map[string]string{}
+				for _, tm := range dynamoDestinationOpts.GetTableMappings() {
+					tableMap[tm.GetSourceTable()] = tm.GetDestinationTable()
+				}
+				mappedTable, ok := tableMap[resp.TableName]
+				if !ok {
+					return nil, fmt.Errorf("did not find table map for %q when building dynamodb destination config", resp.TableName)
+				}
+				resp.Config.Output.Broker.Outputs = append(resp.Config.Output.Broker.Outputs, neosync_benthos.Outputs{
+					AwsDynamoDB: &neosync_benthos.OutputAwsDynamoDB{
+						Table: mappedTable,
+						JsonMapColumns: map[string]string{
+							"": ".",
+						},
+
+						Batching: &neosync_benthos.Batching{
+							// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchWriteItem.html
+							// A single call to BatchWriteItem can transmit up to 16MB of data over the network, consisting of up to 25 item put or delete operations
+							// Specifying the count here may not be enough if the overall data is above 16MB.
+							// Benthos will fall back on error to single writes however
+							Period: "5s",
+							Count:  25,
+						},
+
+						Region:      connection.DynamodbConfig.GetRegion(),
+						Endpoint:    connection.DynamodbConfig.GetEndpoint(),
+						Credentials: buildBenthosS3Credentials(connection.DynamodbConfig.GetCredentials()),
+					},
+				})
 			default:
 				return nil, fmt.Errorf("unsupported destination connection config: %T", destinationConnection.GetConnectionConfig().GetConfig())
 			}
@@ -253,10 +293,6 @@ func (b *benthosBuilder) getJobById(
 	return getjobResp.Msg.Job, nil
 }
 
-func hasTransformer(t mgmtv1alpha1.TransformerSource) bool {
-	return t != mgmtv1alpha1.TransformerSource_TRANSFORMER_SOURCE_UNSPECIFIED && t != mgmtv1alpha1.TransformerSource_TRANSFORMER_SOURCE_PASSTHROUGH
-}
-
 func groupGenerateSourceOptionsByTable(
 	schemaOptions []*mgmtv1alpha1.GenerateSourceSchemaOption,
 ) map[string]*generateSourceTableOptions {
@@ -287,7 +323,7 @@ func getSqlDriverFromConnection(conn *mgmtv1alpha1.Connection) (string, error) {
 	}
 }
 
-func groupJobSourceOptionsByTable(
+func groupSqlJobSourceOptionsByTable(
 	sqlSourceOpts *sqlJobSourceOpts,
 ) map[string]*sqlSourceTableOptions {
 	groupedMappings := map[string]*sqlSourceTableOptions{}

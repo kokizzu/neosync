@@ -260,6 +260,11 @@ const sidebars: SidebarsConfig = {
       label: 'MongoDB',
     },
     {
+      type: 'doc',
+      id: 'connections/dynamodb',
+      label: 'DynamoDB',
+    },
+    {
       type: 'html',
       value: '<div>Transformers</div>',
       className: 'sidebarcategory',
@@ -273,6 +278,11 @@ const sidebars: SidebarsConfig = {
       type: 'doc',
       id: 'transformers/system',
       label: 'System',
+    },
+    {
+      type: 'doc',
+      id: 'transformers/javascript',
+      label: 'Javascript',
     },
     {
       type: 'doc',

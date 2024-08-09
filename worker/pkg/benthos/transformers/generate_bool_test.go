@@ -4,13 +4,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	"github.com/nucleuscloud/neosync/worker/pkg/rng"
 	"github.com/stretchr/testify/assert"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
 
 func Test_GenerateRandomBool(t *testing.T) {
-	res := generateRandomizerBool(rng.New(time.Now().UnixNano()))
+	res := generateRandomBool(rng.New(time.Now().UnixNano()))
 	assert.IsType(t, res, false)
 }
 

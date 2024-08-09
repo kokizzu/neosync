@@ -21,7 +21,7 @@ import (
 func NewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "up",
-		Short: "Run all database migrations",
+		Short: "Run all database migrations up",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			schemaDir, err := cmd.Flags().GetString("source")
 			if err != nil {
@@ -56,15 +56,6 @@ func NewCmd() *cobra.Command {
 	cmd.Flags().StringP("database", "d", "", "optionally set the database url, otherwise it will pull from the environment")
 	cmd.Flags().StringP("source", "s", "", "optionally set the migrations dir, otherwise pull from DB_SCHEMA_DIR env")
 	return cmd
-}
-
-func UpWithDb(
-	ctx context.Context,
-	db any,
-	schemaDir string,
-	logger *slog.Logger,
-) error {
-	return nil
 }
 
 func getSourceUrl(schemaDir string) (string, error) {

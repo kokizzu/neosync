@@ -10,6 +10,7 @@ import {
 } from '@neosync/sdk';
 import { ReactElement } from 'react';
 import AwsS3Form from './AwsS3Form';
+import DynamoDBForm from './DynamoDBForm';
 import GcpCloudStorageForm from './GcpCloudStorageForm';
 import MongoDbForm from './MongoDbForm';
 import MysqlForm from './MysqlForm';
@@ -97,11 +98,11 @@ export function getConnectionComponentDetails(
             leftIcon={
               headerType == 'neon' ? (
                 <ConnectionIcon
-                  connectionType="postgres"
+                  connectionType="pgConfig"
                   connectionTypeVariant="neon"
                 />
               ) : (
-                <ConnectionIcon connectionType="postgres" />
+                <ConnectionIcon connectionType="pgConfig" />
               )
             }
             extraHeading={extraPageHeading}
@@ -136,15 +137,15 @@ export function getConnectionComponentDetails(
                 user: value.tunnel?.user ?? '',
                 passphrase:
                   value.tunnel && value.tunnel.authentication
-                    ? getPassphraseFromSshAuthentication(
+                    ? (getPassphraseFromSshAuthentication(
                         value.tunnel.authentication
-                      ) ?? ''
+                      ) ?? '')
                     : '',
                 privateKey:
                   value.tunnel && value.tunnel.authentication
-                    ? getPrivateKeyFromSshAuthentication(
+                    ? (getPrivateKeyFromSshAuthentication(
                         value.tunnel.authentication
-                      ) ?? ''
+                      ) ?? '')
                     : '',
               },
             }}
@@ -179,66 +180,66 @@ export function getConnectionComponentDetails(
             port: mysqlConfig.port,
             protocol: mysqlConfig.protocol,
           };
-
+          break;
         case 'url':
           mysqlConfig = mysqlValue.connectionConfig.value;
-
+          break;
         default:
           mysqlConfig = mysqlValue.connectionConfig.value;
           mysqldbConfig = mysqldbConfig;
-
-          return {
-            name: connection.name,
-            summary: (
-              <div>
-                <p>No summary found.</p>
-              </div>
-            ),
-            header: (
-              <PageHeader
-                header="Mysql"
-                leftIcon={<ConnectionIcon connectionType="mysql" />}
-                extraHeading={extraPageHeading}
-                subHeadings={subHeading}
-              />
-            ),
-            body: (
-              <MysqlForm
-                connectionId={connection.id}
-                defaultValues={{
-                  connectionName: connection.name,
-                  db: mysqldbConfig,
-                  url: typeof mysqlConfig === 'string' ? mysqlConfig : '',
-                  options: {
-                    maxConnectionLimit:
-                      mysqlValue.connectionOptions?.maxConnectionLimit,
-                  },
-                  tunnel: {
-                    host: mysqlValue.tunnel?.host ?? '',
-                    port: mysqlValue.tunnel?.port ?? 22,
-                    knownHostPublicKey:
-                      mysqlValue.tunnel?.knownHostPublicKey ?? '',
-                    user: mysqlValue.tunnel?.user ?? '',
-                    passphrase:
-                      mysqlValue.tunnel && mysqlValue.tunnel.authentication
-                        ? getPassphraseFromSshAuthentication(
-                            mysqlValue.tunnel.authentication
-                          ) ?? ''
-                        : '',
-                    privateKey:
-                      mysqlValue.tunnel && mysqlValue.tunnel.authentication
-                        ? getPrivateKeyFromSshAuthentication(
-                            mysqlValue.tunnel.authentication
-                          ) ?? ''
-                        : '',
-                  },
-                }}
-                onSaved={(resp) => onSaved(resp)}
-                onSaveFailed={onSaveFailed}
-              />
-            ),
-          };
       }
+
+      return {
+        name: connection.name,
+        summary: (
+          <div>
+            <p>No summary found.</p>
+          </div>
+        ),
+        header: (
+          <PageHeader
+            header="Mysql"
+            leftIcon={<ConnectionIcon connectionType="mysqlConfig" />}
+            extraHeading={extraPageHeading}
+            subHeadings={subHeading}
+          />
+        ),
+        body: (
+          <MysqlForm
+            connectionId={connection.id}
+            defaultValues={{
+              connectionName: connection.name,
+              db: mysqldbConfig,
+              url: typeof mysqlConfig === 'string' ? mysqlConfig : '',
+              options: {
+                maxConnectionLimit:
+                  mysqlValue.connectionOptions?.maxConnectionLimit,
+              },
+              tunnel: {
+                host: mysqlValue.tunnel?.host ?? '',
+                port: mysqlValue.tunnel?.port ?? 22,
+                knownHostPublicKey: mysqlValue.tunnel?.knownHostPublicKey ?? '',
+                user: mysqlValue.tunnel?.user ?? '',
+                passphrase:
+                  mysqlValue.tunnel && mysqlValue.tunnel.authentication
+                    ? (getPassphraseFromSshAuthentication(
+                        mysqlValue.tunnel.authentication
+                      ) ?? '')
+                    : '',
+                privateKey:
+                  mysqlValue.tunnel && mysqlValue.tunnel.authentication
+                    ? (getPrivateKeyFromSshAuthentication(
+                        mysqlValue.tunnel.authentication
+                      ) ?? '')
+                    : '',
+              },
+            }}
+            onSaved={(resp) => onSaved(resp)}
+            onSaveFailed={onSaveFailed}
+          />
+        ),
+      };
+
     case 'awsS3Config':
       return {
         name: connection.name,
@@ -250,7 +251,7 @@ export function getConnectionComponentDetails(
         header: (
           <PageHeader
             header="AWS S3"
-            leftIcon={<ConnectionIcon connectionType="aws-s3" />}
+            leftIcon={<ConnectionIcon connectionType="awsS3Config" />}
             extraHeading={extraPageHeading}
             subHeadings={subHeading}
           />
@@ -282,6 +283,9 @@ export function getConnectionComponentDetails(
                   roleExternalId:
                     connection.connectionConfig.config.value.credentials
                       ?.roleExternalId,
+                  profile:
+                    connection.connectionConfig.config.value.credentials
+                      ?.profile,
                 },
                 endpoint: connection.connectionConfig.config.value.endpoint,
                 region: connection.connectionConfig.config.value.region,
@@ -303,7 +307,7 @@ export function getConnectionComponentDetails(
         header: (
           <PageHeader
             header="OpenAI"
-            leftIcon={<ConnectionIcon connectionType="openai" />}
+            leftIcon={<ConnectionIcon connectionType="openaiConfig" />}
             extraHeading={extraPageHeading}
             subHeadings={subHeading}
           />
@@ -353,7 +357,7 @@ export function getConnectionComponentDetails(
         header: (
           <PageHeader
             header="MongoDB"
-            leftIcon={<ConnectionIcon connectionType="mongodb" />}
+            leftIcon={<ConnectionIcon connectionType="mongoConfig" />}
             extraHeading={extraPageHeading}
             subHeadings={subHeading}
           />
@@ -398,7 +402,7 @@ export function getConnectionComponentDetails(
         header: (
           <PageHeader
             header="GCP Cloud Storage"
-            leftIcon={<ConnectionIcon connectionType="gcp-cloud-storage" />}
+            leftIcon={<ConnectionIcon connectionType="gcpCloudstorageConfig" />}
             extraHeading={extraPageHeading}
             subHeadings={subHeading}
           />
@@ -411,6 +415,61 @@ export function getConnectionComponentDetails(
               gcp: {
                 bucket: connection.connectionConfig.config.value.bucket,
                 pathPrefix: connection.connectionConfig.config.value.pathPrefix,
+              },
+            }}
+            onSaved={(resp) => onSaved(resp)}
+            onSaveFailed={onSaveFailed}
+          />
+        ),
+      };
+    }
+    case 'dynamodbConfig': {
+      return {
+        name: connection.name,
+        summary: (
+          <div>
+            <p>No summary found.</p>
+          </div>
+        ),
+        header: (
+          <PageHeader
+            header="DynamoDB"
+            leftIcon={<ConnectionIcon connectionType="dynamodbConfig" />}
+            extraHeading={extraPageHeading}
+            subHeadings={subHeading}
+          />
+        ),
+        body: (
+          <DynamoDBForm
+            connectionId={connection.id}
+            defaultValues={{
+              connectionName: connection.name,
+              db: {
+                credentials: {
+                  accessKeyId:
+                    connection.connectionConfig.config.value.credentials
+                      ?.accessKeyId,
+                  secretAccessKey:
+                    connection.connectionConfig.config.value.credentials
+                      ?.secretAccessKey,
+                  sessionToken:
+                    connection.connectionConfig.config.value.credentials
+                      ?.sessionToken,
+                  fromEc2Role:
+                    connection.connectionConfig.config.value.credentials
+                      ?.fromEc2Role,
+                  roleArn:
+                    connection.connectionConfig.config.value.credentials
+                      ?.roleArn,
+                  roleExternalId:
+                    connection.connectionConfig.config.value.credentials
+                      ?.roleExternalId,
+                  profile:
+                    connection.connectionConfig.config.value.credentials
+                      ?.profile,
+                },
+                endpoint: connection.connectionConfig.config.value.endpoint,
+                region: connection.connectionConfig.config.value.region,
               },
             }}
             onSaved={(resp) => onSaved(resp)}

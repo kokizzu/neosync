@@ -1,14 +1,21 @@
 import { RESOURCE_NAME_REGEX } from '@/yup-validations/connections';
 import {
-  DestinationFormValues,
   JobMappingFormValues,
+  NewDestinationFormValues,
   SchemaFormValues,
   SourceFormValues,
 } from '@/yup-validations/jobs';
-import { Connection } from '@neosync/sdk';
+import { PartialMessage } from '@bufbuild/protobuf';
+import {
+  ConnectError,
+  Connection,
+  IsJobNameAvailableRequest,
+  IsJobNameAvailableResponse,
+} from '@neosync/sdk';
+import { UseMutateAsyncFunction } from '@tanstack/react-query';
 import cron from 'cron-validate';
 import * as Yup from 'yup';
-import { isJobNameAvailable } from '../../jobs/util';
+import { isValidConnectionPair } from '../../connections/util';
 
 export type NewJobType = 'data-sync' | 'generate-table' | 'ai-generate-table';
 
@@ -76,8 +83,23 @@ export const DefineFormValues = Yup.object({
         if (!accountId) {
           return false;
         }
-        const res = await isJobNameAvailable(value, accountId);
-        return res.isAvailable;
+        const isJobNameAvailable:
+          | UseMutateAsyncFunction<
+              IsJobNameAvailableResponse,
+              ConnectError,
+              PartialMessage<IsJobNameAvailableRequest>,
+              unknown
+            >
+          | undefined = context?.options?.context?.isJobNameAvailable;
+        if (isJobNameAvailable) {
+          const res = await isJobNameAvailable({ accountId, name: value });
+          if (!res.isAvailable) {
+            return context.createError({
+              message: 'This Job Name is already taken.',
+            });
+          }
+        }
+        return true;
       }
     ),
   cronSchedule: Yup.string()
@@ -107,13 +129,21 @@ export type DefineFormValues = Yup.InferType<typeof DefineFormValues>;
 
 export const ConnectFormValues = SourceFormValues.concat(
   Yup.object({
-    destinations: Yup.array(DestinationFormValues).required(),
+    destinations: Yup.array(NewDestinationFormValues).required(),
   })
 ).test(
+  // todo: need to add a test for generate / ai generate too
   'unique-connections',
   'connections must be unique and type specific', // this message isn't exposed anywhere
   function (value, ctx) {
     const connections: Connection[] = ctx.options.context?.connections ?? [];
+    const connectionsRecord = connections.reduce(
+      (record, conn) => {
+        record[conn.id] = conn;
+        return record;
+      },
+      {} as Record<string, Connection>
+    );
 
     const destinationIds = value.destinations.map((dst) => dst.connectionId);
 
@@ -128,24 +158,43 @@ export const ConnectFormValues = SourceFormValues.concat(
       );
     }
 
-    if (
-      destinationIds.some(
-        (destId) => !isValidConnectionPair(value.sourceId, destId, connections)
-      )
-    ) {
+    const sourceConn = connectionsRecord[value.sourceId];
+    if (!sourceConn) {
+      errors.push(
+        ctx.createError({
+          path: 'sourceId',
+          message: 'Source is not a valid connection',
+        })
+      );
+      return new Yup.ValidationError(errors);
+    }
+
+    const invalidDestinationConnections = destinationIds
+      .map((destId) => connectionsRecord[destId])
+      .filter((dest) => !!dest && !isValidConnectionPair(sourceConn, dest));
+    if (invalidDestinationConnections.length > 0) {
+      const invalidDestRecord = invalidDestinationConnections.reduce(
+        (record, dest) => {
+          record[dest.id] = dest;
+          return record;
+        },
+        {} as Record<string, Connection>
+      );
       destinationIds.forEach((destId, idx) => {
-        if (!isValidConnectionPair(value.sourceId, destId, connections)) {
-          errors.push(
-            ctx.createError({
-              path: `destinations.${idx}.connectionId`,
-              message: `Destination connection type must be one of: ${getErrorConnectionTypes(
-                false,
-                value.sourceId,
-                connections
-              )}`,
-            })
-          );
+        const invalidDest = invalidDestRecord[destId];
+        if (!invalidDest) {
+          return;
         }
+        errors.push(
+          ctx.createError({
+            path: `destinations.${idx}.connectionId`,
+            message: `Destination connection type must be one of: ${getErrorConnectionTypes(
+              false,
+              value.sourceId,
+              connections
+            )}`,
+          })
+        );
       });
     }
 
@@ -181,42 +230,9 @@ export const ConnectFormValues = SourceFormValues.concat(
     return true;
   }
 );
-
 export type ConnectFormValues = Yup.InferType<typeof ConnectFormValues>;
 
-function isValidConnectionPair(
-  connId1: string,
-  connId2: string,
-  connections: Connection[]
-): boolean {
-  const conn1 = connections.find((c) => c.id === connId1);
-  const conn2 = connections.find((c) => c.id === connId2);
-
-  if (!conn1 || !conn2) {
-    return true;
-  }
-  if (
-    conn1.connectionConfig?.config.case === 'awsS3Config' ||
-    conn2.connectionConfig?.config.case === 'awsS3Config'
-  ) {
-    return true;
-  }
-  if (
-    conn1.connectionConfig?.config.case === 'gcpCloudstorageConfig' ||
-    conn2.connectionConfig?.config.case === 'gcpCloudstorageConfig'
-  ) {
-    return true;
-  }
-
-  if (
-    conn1.connectionConfig?.config.case === conn2.connectionConfig?.config.case
-  ) {
-    return true;
-  }
-
-  return false;
-}
-
+// todo: move this and centralize / automate using new maps
 function getErrorConnectionTypes(
   isSource: boolean,
   connId: string,
@@ -225,8 +241,8 @@ function getErrorConnectionTypes(
   const conn = connections.find((c) => c.id === connId);
   if (!conn) {
     return isSource
-      ? '[Postgres, Mysql]'
-      : '[Postgres, Mysql, AWS S3, GCP Cloud Storage]';
+      ? '[Postgres, Mysql, MongoDB, DynamoDB]'
+      : '[Postgres, Mysql, MongoDB, DynamoDB, AWS S3, GCP Cloud Storage]';
   }
   if (
     conn.connectionConfig?.config.case === 'awsS3Config' ||
@@ -241,6 +257,9 @@ function getErrorConnectionTypes(
   if (conn.connectionConfig?.config.case === 'pgConfig') {
     return isSource ? '[Mysql]' : '[Postgres, AWS S3, GCP Cloud Storage]';
   }
+  if (conn.connectionConfig?.config.case === 'dynamodbConfig') {
+    return isSource ? '[DynamoDB]' : '[DynamoDB]';
+  }
   return '';
 }
 
@@ -252,7 +271,7 @@ const SINGLE_SUBSET_FORM_SCHEMA = Yup.object({
 
 export const SingleTableConnectFormValues = Yup.object({
   fkSourceConnectionId: Yup.string().required('Connection is required').uuid(),
-  destination: DestinationFormValues,
+  destination: NewDestinationFormValues,
 });
 export type SingleTableConnectFormValues = Yup.InferType<
   typeof SingleTableConnectFormValues
@@ -261,7 +280,7 @@ export type SingleTableConnectFormValues = Yup.InferType<
 export const SingleTableAiConnectFormValues = Yup.object({
   sourceId: Yup.string().required('Connection is required').uuid(),
   fkSourceConnectionId: Yup.string().required('Connection is required').uuid(),
-  destination: DestinationFormValues,
+  destination: NewDestinationFormValues,
 });
 
 export type SingleTableAiConnectFormValues = Yup.InferType<
@@ -271,11 +290,23 @@ export type SingleTableAiConnectFormValues = Yup.InferType<
 export const SingleTableAiSchemaFormValues = Yup.object({
   numRows: Yup.number()
     .required('Must provide a number of rows to generate')
-    .min(1)
-    .max(1000)
+    .min(1, 'Must be at least 1')
+    .max(1000, 'Can be no more than 1000')
     .default(10),
   model: Yup.string().required('must provide a model name to use.'),
   userPrompt: Yup.string(),
+  generateBatchSize: Yup.number()
+    .required('Must provide a batch size when generating rows')
+    .min(1, 'Must be at least 1')
+    .max(100, 'Can be no more than 100')
+    .default(10)
+    .test(
+      'batch-size-num-rows',
+      'batch size must always be smaller than the number of rows',
+      function (value, context) {
+        return value <= context.parent.numRows;
+      }
+    ),
 
   schema: Yup.string().required('Must provide a valid schema'),
   table: Yup.string().required('Must provide a valid table'),
@@ -296,11 +327,23 @@ export const SingleTableEditAiSourceFormValues = Yup.object({
   schema: Yup.object({
     numRows: Yup.number()
       .required('Must provide a number of rows to generate')
-      .min(1)
-      .max(1000)
+      .min(1, 'Must be at least 1')
+      .max(1000, 'Can be no more than 1000')
       .default(10),
     model: Yup.string().required('must provide a model name to use.'),
     userPrompt: Yup.string(),
+    generateBatchSize: Yup.number()
+      .required('Must provide a batch size when generating rows')
+      .min(1, 'Must be at least 1')
+      .max(100, 'Can be no more than 100')
+      .default(10)
+      .test(
+        'batch-size-num-rows',
+        'batch size must always be smaller than the number of rows',
+        function (value, context) {
+          return value <= context.parent.numRows;
+        }
+      ),
 
     schema: Yup.string().required('Must provide a valid schema'),
     table: Yup.string().required('Must provide a valid table'),
@@ -370,3 +413,13 @@ export const CreateSingleTableAiGenerateJobFormValues = Yup.object({
 export type CreateSingleTableAiGenerateJobFormValues = Yup.InferType<
   typeof CreateSingleTableAiGenerateJobFormValues
 >;
+
+export interface DefineFormValuesContext {
+  accountId: string;
+  isJobNameAvailable: UseMutateAsyncFunction<
+    IsJobNameAvailableResponse,
+    ConnectError,
+    PartialMessage<IsJobNameAvailableRequest>,
+    unknown
+  >;
+}

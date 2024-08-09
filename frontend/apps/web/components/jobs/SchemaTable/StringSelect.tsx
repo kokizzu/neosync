@@ -36,17 +36,19 @@ export function StringSelect(props: Props): ReactElement {
           variant="outline"
           role="combobox"
           aria-expanded={open}
-          className=" justify-between "
+          className=" justify-between min-w-[163px]"
         >
           {value ? values.find((v) => v === value) : `Select ${text}...`}
           <ChevronDownIcon className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className=" p-0">
+      <PopoverContent className="p-0 ml-20">
         <Command>
           <CommandInput placeholder={`Search ${text}...`} />
           <CommandList>
-            <CommandEmpty>No tables found.</CommandEmpty>
+            <CommandEmpty>
+              <div className="text-sm text-gray-500 p-4">No {text} found.</div>
+            </CommandEmpty>
             <CommandGroup>
               {values.map((v) => (
                 <CommandItem
@@ -63,10 +65,14 @@ export function StringSelect(props: Props): ReactElement {
                       value === v ? 'opacity-100' : 'opacity-0'
                     )}
                   />
-                  <p className="mr-2">{v}</p>
-                  {badgeValueMap && (
-                    <Badge variant="secondary">{badgeValueMap[v]}</Badge>
-                  )}
+                  <div className="flex flex-row justify-between w-full">
+                    <p className="mr-2">{v}</p>
+                    <div>
+                      {badgeValueMap && (
+                        <Badge variant="secondary">{badgeValueMap[v]}</Badge>
+                      )}
+                    </div>
+                  </div>
                 </CommandItem>
               ))}
             </CommandGroup>

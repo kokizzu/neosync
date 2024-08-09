@@ -21,11 +21,16 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { toast } from '@/components/ui/use-toast';
-import { useGetJobRecentRuns } from '@/libs/hooks/useGetJobRecentRuns';
-import { useGetJobRunsByJob } from '@/libs/hooks/useGetJobRunsByJob';
 import { formatDateTime, getErrorMessage } from '@/util/util';
+import { useMutation, useQuery } from '@connectrpc/connect-query';
 import { JobRunStatus as JobRunStatusEnum } from '@neosync/sdk';
+import {
+  cancelJobRun,
+  deleteJobRun,
+  getJobRecentRuns,
+  getJobRuns,
+  terminateJobRun,
+} from '@neosync/sdk/connectquery';
 import {
   Cross2Icon,
   DotsHorizontalIcon,
@@ -34,12 +39,8 @@ import {
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ReactElement } from 'react';
+import { toast } from 'sonner';
 import JobRunStatus from '../../../runs/components/JobRunStatus';
-import {
-  cancelJobRun,
-  removeJobRun,
-  terminateJobRun,
-} from '../../../runs/components/JobRunsTable/data-table-row-actions';
 
 interface Props {
   jobId: string;
@@ -51,15 +52,22 @@ export default function JobRecentRuns({ jobId }: Props): ReactElement {
     data: recentRunsData,
     isLoading,
     error: recentRunsError,
-    mutate: recentRunsMutate,
-    isValidating,
-  } = useGetJobRecentRuns(account?.id ?? '', jobId);
+    refetch: recentRunsMutate,
+    isFetching: isValidating,
+  } = useQuery(getJobRecentRuns, { jobId }, { enabled: !!jobId });
   const {
     data: jobRunsData,
     isLoading: jobRunsLoading,
-    mutate: jobsRunsMutate,
-    isValidating: jobRunsValidating,
-  } = useGetJobRunsByJob(account?.id ?? '', jobId);
+    isFetching: jobRunsValidating,
+    refetch: jobRunsMutate,
+  } = useQuery(
+    getJobRuns,
+    { id: { case: 'jobId', value: jobId } },
+    { enabled: !!jobId }
+  );
+  const { mutateAsync: removeJobRunAsync } = useMutation(deleteJobRun);
+  const { mutateAsync: cancelJobRunAsync } = useMutation(cancelJobRun);
+  const { mutateAsync: terminateJobRunAsync } = useMutation(terminateJobRun);
 
   const recentRuns = (recentRunsData?.recentRuns ?? []).toReversed();
   const jobRunsIdMap = new Map(
@@ -73,59 +81,46 @@ export default function JobRecentRuns({ jobId }: Props): ReactElement {
 
   function onRefreshClick(): void {
     recentRunsMutate();
-    jobsRunsMutate();
+    jobRunsMutate();
   }
 
   async function onDelete(runId: string): Promise<void> {
     try {
-      await removeJobRun(runId, account?.id ?? '');
+      await removeJobRunAsync({ accountId: account?.id, jobRunId: runId });
       onRefreshClick();
-      toast({
-        title: 'Removing Job Run. This may take a minute to delete!',
-        variant: 'success',
-      });
+      toast.success('Removing Job Run. This may take a minute to delete!');
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to remove job run',
+      toast.error('Unable to remove job run', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
 
   async function onCancel(runId: string): Promise<void> {
     try {
-      await cancelJobRun(runId, account?.id ?? '');
-      toast({
-        title: 'Canceling Job Run. This may take a minute to cancel!',
-        variant: 'success',
-      });
+      await cancelJobRunAsync({ accountId: account?.id, jobRunId: runId });
+      toast.success('Canceling Job Run. This may take a minute to cancel!');
       onRefreshClick();
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to cancel job run',
+      toast.error('Unable to cancel job run', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }
 
   async function onTerminate(runId: string): Promise<void> {
     try {
-      await terminateJobRun(runId, account?.id ?? '');
-      toast({
-        title: 'Terminating Job Run. This may take a minute to terminate!',
-        variant: 'success',
-      });
+      await terminateJobRunAsync({ accountId: account?.id, jobRunId: runId });
+      toast.success(
+        'Terminating Job Run. This may take a minute to terminate!'
+      );
       onRefreshClick();
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to terminate job run',
+      toast.error('Unable to terminate job run', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }

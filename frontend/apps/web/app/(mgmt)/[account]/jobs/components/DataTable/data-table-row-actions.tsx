@@ -13,12 +13,14 @@ import { useRouter } from 'next/navigation';
 
 import DeleteConfirmationDialog from '@/components/DeleteConfirmationDialog';
 import { useAccount } from '@/components/providers/account-provider';
-import { useToast } from '@/components/ui/use-toast';
 import { getErrorMessage } from '@/util/util';
+import { useMutation } from '@connectrpc/connect-query';
+import { deleteJob } from '@neosync/sdk/connectquery';
 import { DotsHorizontalIcon } from '@radix-ui/react-icons';
 import { nanoid } from 'nanoid';
+import { toast } from 'sonner';
 import { getJobCloneUrlFromJob } from '../../[id]/components/JobCloneButton';
-import { removeJob, setDefaultNewJobFormValues } from '../../util';
+import { setDefaultNewJobFormValues } from '../../util';
 
 interface DataTableRowActionsProps<TData> {
   row: Row<TData>;
@@ -32,23 +34,17 @@ export function DataTableRowActions<TData>({
   const job = row.original as Job;
   const router = useRouter();
   const { account } = useAccount();
-
-  const { toast } = useToast();
+  const { mutateAsync: removeJob } = useMutation(deleteJob);
 
   async function onDelete(): Promise<void> {
     try {
-      await removeJob(account?.id ?? '', job.id);
-      toast({
-        title: 'Job removed successfully!',
-        variant: 'success',
-      });
+      await removeJob({ id: job.id });
+      toast.success('Job removed successfully!');
       onDeleted();
     } catch (err) {
       console.error(err);
-      toast({
-        title: 'Unable to remove job',
+      toast.error('Unable to remove job', {
         description: getErrorMessage(err),
-        variant: 'destructive',
       });
     }
   }

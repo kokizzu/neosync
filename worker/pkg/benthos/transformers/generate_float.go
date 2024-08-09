@@ -5,21 +5,23 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
 	"github.com/nucleuscloud/neosync/worker/pkg/rng"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
+
+// +neosyncTransformerBuilder:generate:generateFloat64
 
 func init() {
 	spec := bloblang.NewPluginSpec().
-		Param(bloblang.NewBoolParam("randomize_sign").Default(false)).
-		Param(bloblang.NewFloat64Param("min")).
-		Param(bloblang.NewFloat64Param("max")).
-		Param(bloblang.NewInt64Param("precision").Optional()).
-		Param(bloblang.NewInt64Param("scale").Optional()).
-		Param(bloblang.NewInt64Param("seed").Default(time.Now().UnixNano()))
+		Description("Generates a random float64 value.").
+		Param(bloblang.NewBoolParam("randomize_sign").Default(false).Description("A boolean indicating whether the sign of the float should be randomized.")).
+		Param(bloblang.NewFloat64Param("min").Description("Specifies the minimum value for the generated float.")).
+		Param(bloblang.NewFloat64Param("max").Description("Specifies the maximum value for the generated float")).
+		Param(bloblang.NewInt64Param("precision").Optional().Description("An optional parameter that defines the number of significant digits for the generated float.")).
+		Param(bloblang.NewInt64Param("scale").Optional().Description("An optional parameter that defines the number of decimal places for the generated float.")).
+		Param(bloblang.NewInt64Param("seed").Optional().Description("An optional seed value used to generate deterministic outputs."))
 
 	err := bloblang.RegisterFunctionV2("generate_float64", spec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
 		randomizeSign, err := args.GetBool("randomize_sign")
@@ -45,7 +47,12 @@ func init() {
 		if err != nil {
 			return nil, err
 		}
-		seed, err := args.GetInt64("seed")
+		seedArg, err := args.GetOptionalInt64("seed")
+		if err != nil {
+			return nil, err
+		}
+
+		seed, err := transformer_utils.GetSeedOrDefault(seedArg)
 		if err != nil {
 			return nil, err
 		}
@@ -63,6 +70,22 @@ func init() {
 	if err != nil {
 		panic(err)
 	}
+}
+
+func (t *GenerateFloat64) Generate(opts any) (any, error) {
+	parsedOpts, ok := opts.(*GenerateFloat64Opts)
+	if !ok {
+		return nil, fmt.Errorf("invalid parsed opts: %T", opts)
+	}
+
+	return generateRandomFloat64(
+		parsedOpts.randomizer,
+		parsedOpts.randomizeSign,
+		parsedOpts.min,
+		parsedOpts.max,
+		parsedOpts.precision,
+		parsedOpts.scale,
+	)
 }
 
 /* Generates a random float64 value within the interval [min, max]*/
@@ -118,7 +141,7 @@ func generateRandomFloat64(
 		}
 	}
 
-	if randomizeSign && generateRandomizerBool(randomizer) {
+	if randomizeSign && generateRandomBool(randomizer) {
 		randomFloat *= -1
 	}
 

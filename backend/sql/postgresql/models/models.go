@@ -16,6 +16,7 @@ type ConnectionConfig struct {
 	OpenAiConfig          *OpenAiConnectionConfig         `json:"openaiConfig,omitempty"`
 	MongoConfig           *MongoConnectionConfig          `json:"mongoConfig,omitempty"`
 	GcpCloudStorageConfig *GcpCloudStorageConfig          `json:"gcpCloudStorageConfig,omitempty"`
+	DynamoDBConfig        *DynamoDBConfig                 `json:"dynamoDBConfig,omitempty"`
 }
 
 func (c *ConnectionConfig) ToDto() (*mgmtv1alpha1.ConnectionConfig, error) {
@@ -144,6 +145,16 @@ func (c *ConnectionConfig) ToDto() (*mgmtv1alpha1.ConnectionConfig, error) {
 				GcpCloudstorageConfig: gdto,
 			},
 		}, nil
+	} else if c.DynamoDBConfig != nil {
+		dto, err := c.DynamoDBConfig.ToDto()
+		if err != nil {
+			return nil, err
+		}
+		return &mgmtv1alpha1.ConnectionConfig{
+			Config: &mgmtv1alpha1.ConnectionConfig_DynamodbConfig{
+				DynamodbConfig: dto,
+			},
+		}, nil
 	}
 	return nil, errors.ErrUnsupported
 }
@@ -231,6 +242,12 @@ func (c *ConnectionConfig) FromDto(dto *mgmtv1alpha1.ConnectionConfig) error {
 		if err != nil {
 			return err
 		}
+	case *mgmtv1alpha1.ConnectionConfig_DynamodbConfig:
+		c.DynamoDBConfig = &DynamoDBConfig{}
+		err := c.DynamoDBConfig.FromDto(config.DynamodbConfig)
+		if err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("unable to convert to ConnectionConfig from DTO ConnectionConfig, type not supported: %T", config)
 	}
@@ -304,6 +321,34 @@ func (g *GcpCloudStorageConfig) FromDto(dto *mgmtv1alpha1.GcpCloudStorageConnect
 	g.Bucket = dto.Bucket
 	g.PathPrefix = dto.PathPrefix
 	g.ServiceAccountCredentials = dto.ServiceAccountCredentials
+	return nil
+}
+
+type DynamoDBConfig struct {
+	Credentials *AwsS3Credentials
+	Region      *string
+	Endpoint    *string
+}
+
+func (d *DynamoDBConfig) ToDto() (*mgmtv1alpha1.DynamoDBConnectionConfig, error) {
+	var creds *mgmtv1alpha1.AwsS3Credentials
+	if d.Credentials != nil {
+		creds = d.Credentials.ToDto()
+	}
+	return &mgmtv1alpha1.DynamoDBConnectionConfig{
+		Credentials: creds,
+		Region:      d.Region,
+		Endpoint:    d.Endpoint,
+	}, nil
+}
+
+func (d *DynamoDBConfig) FromDto(dto *mgmtv1alpha1.DynamoDBConnectionConfig) error {
+	if dto.Credentials != nil {
+		d.Credentials = &AwsS3Credentials{}
+		d.Credentials.FromDto(dto.Credentials)
+	}
+	d.Endpoint = dto.Endpoint
+	d.Region = dto.Region
 	return nil
 }
 
@@ -471,6 +516,30 @@ type AwsS3Credentials struct {
 	RoleExternalId  *string `json:"roleExternalId,omitempty"`
 }
 
+func (a *AwsS3Credentials) ToDto() *mgmtv1alpha1.AwsS3Credentials {
+	return &mgmtv1alpha1.AwsS3Credentials{
+		Profile:         a.Profile,
+		AccessKeyId:     a.AccessKeyId,
+		SecretAccessKey: a.SecretAccessKey,
+		SessionToken:    a.SessionToken,
+		FromEc2Role:     a.FromEc2Role,
+		RoleArn:         a.RoleArn,
+		RoleExternalId:  a.RoleExternalId,
+	}
+}
+func (a *AwsS3Credentials) FromDto(dto *mgmtv1alpha1.AwsS3Credentials) {
+	if dto == nil {
+		return
+	}
+	a.Profile = dto.Profile
+	a.AccessKeyId = dto.AccessKeyId
+	a.SecretAccessKey = dto.SecretAccessKey
+	a.SessionToken = dto.SessionToken
+	a.FromEc2Role = dto.FromEc2Role
+	a.RoleArn = dto.RoleArn
+	a.RoleExternalId = dto.RoleExternalId
+}
+
 type LocalDirectoryConnectionConfig struct {
 	Path string `json:"path"`
 }
@@ -502,30 +571,6 @@ func (o *OpenAiConnectionConfig) FromDto(dto *mgmtv1alpha1.OpenAiConnectionConfi
 	}
 	o.ApiKey = dto.ApiKey
 	o.ApiUrl = dto.ApiUrl
-}
-
-func (a *AwsS3Credentials) ToDto() *mgmtv1alpha1.AwsS3Credentials {
-	return &mgmtv1alpha1.AwsS3Credentials{
-		Profile:         a.Profile,
-		AccessKeyId:     a.AccessKeyId,
-		SecretAccessKey: a.SecretAccessKey,
-		SessionToken:    a.SessionToken,
-		FromEc2Role:     a.FromEc2Role,
-		RoleArn:         a.RoleArn,
-		RoleExternalId:  a.RoleExternalId,
-	}
-}
-func (a *AwsS3Credentials) FromDto(dto *mgmtv1alpha1.AwsS3Credentials) {
-	if dto == nil {
-		return
-	}
-	a.Profile = dto.Profile
-	a.AccessKeyId = dto.AccessKeyId
-	a.SecretAccessKey = dto.SecretAccessKey
-	a.SessionToken = dto.SessionToken
-	a.FromEc2Role = dto.FromEc2Role
-	a.RoleArn = dto.RoleArn
-	a.RoleExternalId = dto.RoleExternalId
 }
 
 type AwsS3ConnectionConfig struct {
@@ -647,10 +692,150 @@ type JobSourceOptions struct {
 	GenerateOptions   *GenerateSourceOptions   `json:"generateOptions,omitempty"`
 	AiGenerateOptions *AiGenerateSourceOptions `json:"aiGenerateOptions,omitempty"`
 	MongoDbOptions    *MongoDbSourceOptions    `json:"mongoOptions,omitempty"`
+	DynamoDBOptions   *DynamoDBSourceOptions   `json:"dynamoDBOptions,omitempty"`
+}
+
+type DynamoDBSourceOptions struct {
+	ConnectionId         string                                 `json:"connectionId"`
+	Tables               []*DynamoDBSourceTableOption           `json:"tables"`
+	UnmappedTransforms   *DynamoDBSourceUnmappedTransformConfig `json:"unmappedTransforms"`
+	EnableConsistentRead bool                                   `json:"enableConsistentRead"`
+}
+
+type DynamoDBSourceUnmappedTransformConfig struct {
+	B       *JobMappingTransformerModel `json:"b"`
+	Boolean *JobMappingTransformerModel `json:"boolean"`
+	N       *JobMappingTransformerModel `json:"n"`
+	S       *JobMappingTransformerModel `json:"s"`
+}
+
+func (s *DynamoDBSourceUnmappedTransformConfig) ToDto() *mgmtv1alpha1.DynamoDBSourceUnmappedTransformConfig {
+	return &mgmtv1alpha1.DynamoDBSourceUnmappedTransformConfig{
+		B:       s.B.ToTransformerDto(),
+		Boolean: s.Boolean.ToTransformerDto(),
+		N:       s.N.ToTransformerDto(),
+		S:       s.S.ToTransformerDto(),
+	}
+}
+func (s *DynamoDBSourceUnmappedTransformConfig) FromDto(dto *mgmtv1alpha1.DynamoDBSourceUnmappedTransformConfig) error {
+	if dto == nil {
+		dto = &mgmtv1alpha1.DynamoDBSourceUnmappedTransformConfig{}
+	}
+	s.B = &JobMappingTransformerModel{}
+	err := s.B.FromTransformerDto(dto.GetB())
+	if err != nil {
+		return err
+	}
+	s.Boolean = &JobMappingTransformerModel{}
+	err = s.Boolean.FromTransformerDto(dto.GetBoolean())
+	if err != nil {
+		return err
+	}
+
+	s.N = &JobMappingTransformerModel{}
+	err = s.N.FromTransformerDto(dto.GetN())
+	if err != nil {
+		return err
+	}
+
+	s.S = &JobMappingTransformerModel{}
+	err = s.S.FromTransformerDto(dto.GetS())
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+type DynamoDBSourceTableOption struct {
+	Table       string  `json:"table"`
+	WhereClause *string `json:"whereClause,omitempty"`
+}
+
+func (s *DynamoDBSourceTableOption) ToDto() *mgmtv1alpha1.DynamoDBSourceTableOption {
+	return &mgmtv1alpha1.DynamoDBSourceTableOption{
+		Table:       s.Table,
+		WhereClause: s.WhereClause,
+	}
+}
+func (s *DynamoDBSourceTableOption) FromDto(dto *mgmtv1alpha1.DynamoDBSourceTableOption) {
+	if dto == nil {
+		dto = &mgmtv1alpha1.DynamoDBSourceTableOption{}
+	}
+	s.Table = dto.GetTable()
+	s.WhereClause = dto.WhereClause
+}
+
+func (s *DynamoDBSourceOptions) ToDto() *mgmtv1alpha1.DynamoDBSourceConnectionOptions {
+	tables := make([]*mgmtv1alpha1.DynamoDBSourceTableOption, len(s.Tables))
+	for i, t := range s.Tables {
+		tables[i] = t.ToDto()
+	}
+	if s.UnmappedTransforms == nil {
+		s.UnmappedTransforms = &DynamoDBSourceUnmappedTransformConfig{
+			B: &JobMappingTransformerModel{
+				Source: int32(mgmtv1alpha1.TransformerSource_TRANSFORMER_SOURCE_PASSTHROUGH),
+				Config: &TransformerConfigs{
+					Passthrough: &PassthroughConfig{},
+				},
+			},
+			Boolean: &JobMappingTransformerModel{
+				Source: int32(mgmtv1alpha1.TransformerSource_TRANSFORMER_SOURCE_GENERATE_BOOL),
+				Config: &TransformerConfigs{
+					GenerateBool: &GenerateBoolConfig{},
+				},
+			},
+			N: &JobMappingTransformerModel{
+				Source: int32(mgmtv1alpha1.TransformerSource_TRANSFORMER_SOURCE_PASSTHROUGH),
+				Config: &TransformerConfigs{
+					Passthrough: &PassthroughConfig{},
+				},
+			},
+			S: &JobMappingTransformerModel{
+				Source: int32(mgmtv1alpha1.TransformerSource_TRANSFORMER_SOURCE_GENERATE_RANDOM_STRING),
+				Config: &TransformerConfigs{
+					GenerateString: &GenerateStringConfig{},
+				},
+			},
+		}
+	}
+	return &mgmtv1alpha1.DynamoDBSourceConnectionOptions{
+		ConnectionId:         s.ConnectionId,
+		Tables:               tables,
+		UnmappedTransforms:   s.UnmappedTransforms.ToDto(),
+		EnableConsistentRead: s.EnableConsistentRead,
+	}
+}
+
+func (s *DynamoDBSourceOptions) FromDto(dto *mgmtv1alpha1.DynamoDBSourceConnectionOptions) error {
+	if dto == nil {
+		dto = &mgmtv1alpha1.DynamoDBSourceConnectionOptions{}
+	}
+	s.ConnectionId = dto.GetConnectionId()
+	s.Tables = FromDtoDynamoDBSourceTableOptions(dto.GetTables())
+	s.UnmappedTransforms = &DynamoDBSourceUnmappedTransformConfig{}
+	err := s.UnmappedTransforms.FromDto(dto.GetUnmappedTransforms())
+	if err != nil {
+		return err
+	}
+	s.EnableConsistentRead = dto.GetEnableConsistentRead()
+	return nil
 }
 
 type MongoDbSourceOptions struct {
 	ConnectionId string `json:"connectionId"`
+}
+
+func (s *MongoDbSourceOptions) ToDto() *mgmtv1alpha1.MongoDBSourceConnectionOptions {
+	return &mgmtv1alpha1.MongoDBSourceConnectionOptions{
+		ConnectionId: s.ConnectionId,
+	}
+}
+
+func (s *MongoDbSourceOptions) FromDto(dto *mgmtv1alpha1.MongoDBSourceConnectionOptions) {
+	if dto == nil {
+		dto = &mgmtv1alpha1.MongoDBSourceConnectionOptions{}
+	}
+	s.ConnectionId = dto.GetConnectionId()
 }
 
 type MysqlSourceOptions struct {
@@ -686,6 +871,7 @@ type AiGenerateSourceOptions struct {
 	FkSourceConnectionId *string                         `json:"fkSourceConnectionId,omitempty"`
 	ModelName            string                          `json:"modelName"`
 	UserPrompt           *string                         `json:"userPrompt,omitempty"`
+	GenerateBatchSize    *int64                          `json:"generateBatchSize,omitempty"`
 }
 
 type AiGenerateSourceSchemaOption struct {
@@ -803,6 +989,16 @@ func FromDtoMysqlSourceSchemaOptions(dtos []*mgmtv1alpha1.MysqlSourceSchemaOptio
 	return output
 }
 
+func FromDtoDynamoDBSourceTableOptions(dtos []*mgmtv1alpha1.DynamoDBSourceTableOption) []*DynamoDBSourceTableOption {
+	tables := make([]*DynamoDBSourceTableOption, len(dtos))
+	for i, table := range dtos {
+		t := &DynamoDBSourceTableOption{}
+		t.FromDto(table)
+		tables[i] = t
+	}
+	return tables
+}
+
 func (s *GenerateSourceOptions) ToDto() *mgmtv1alpha1.GenerateSourceOptions {
 	dto := &mgmtv1alpha1.GenerateSourceOptions{
 		FkSourceConnectionId: s.FkSourceConnectionId,
@@ -852,25 +1048,13 @@ func FromDtoGenerateSourceSchemaOptions(dtos []*mgmtv1alpha1.GenerateSourceSchem
 	return output
 }
 
-func (s *MongoDbSourceOptions) ToDto() *mgmtv1alpha1.MongoDBSourceConnectionOptions {
-	return &mgmtv1alpha1.MongoDBSourceConnectionOptions{
-		ConnectionId: s.ConnectionId,
-	}
-}
-
-func (s *MongoDbSourceOptions) FromDto(dto *mgmtv1alpha1.MongoDBSourceConnectionOptions) {
-	if dto == nil {
-		dto = &mgmtv1alpha1.MongoDBSourceConnectionOptions{}
-	}
-	s.ConnectionId = dto.GetConnectionId()
-}
-
 func (s *AiGenerateSourceOptions) ToDto() *mgmtv1alpha1.AiGenerateSourceOptions {
 	dto := &mgmtv1alpha1.AiGenerateSourceOptions{
 		FkSourceConnectionId: s.FkSourceConnectionId,
 		AiConnectionId:       s.AiConnectionId,
 		ModelName:            s.ModelName,
 		UserPrompt:           s.UserPrompt,
+		GenerateBatchSize:    s.GenerateBatchSize,
 	}
 	dto.Schemas = make([]*mgmtv1alpha1.AiGenerateSourceSchemaOption, len(s.Schemas))
 	for idx := range s.Schemas {
@@ -896,6 +1080,7 @@ func (s *AiGenerateSourceOptions) FromDto(dto *mgmtv1alpha1.AiGenerateSourceOpti
 	s.AiConnectionId = dto.AiConnectionId
 	s.ModelName = dto.ModelName
 	s.UserPrompt = dto.UserPrompt
+	s.GenerateBatchSize = dto.GenerateBatchSize
 }
 
 func FromDtoAiGenerateSourceSchemaOptions(dtos []*mgmtv1alpha1.AiGenerateSourceSchemaOption) []*AiGenerateSourceSchemaOption {
@@ -973,6 +1158,13 @@ func (j *JobSourceOptions) ToDto() *mgmtv1alpha1.JobSourceOptions {
 			},
 		}
 	}
+	if j.DynamoDBOptions != nil {
+		return &mgmtv1alpha1.JobSourceOptions{
+			Config: &mgmtv1alpha1.JobSourceOptions_Dynamodb{
+				Dynamodb: j.DynamoDBOptions.ToDto(),
+			},
+		}
+	}
 	return nil
 }
 
@@ -998,6 +1190,13 @@ func (j *JobSourceOptions) FromDto(dto *mgmtv1alpha1.JobSourceOptions) error {
 		opts := &MongoDbSourceOptions{}
 		opts.FromDto(dto.GetMongodb())
 		j.MongoDbOptions = opts
+	case *mgmtv1alpha1.JobSourceOptions_Dynamodb:
+		opts := &DynamoDBSourceOptions{}
+		err := opts.FromDto(dto.GetDynamodb())
+		if err != nil {
+			return err
+		}
+		j.DynamoDBOptions = opts
 	default:
 		return fmt.Errorf("invalid job source options config, received type: %T", config)
 	}
@@ -1010,6 +1209,46 @@ type JobDestinationOptions struct {
 	MysqlOptions           *MysqlDestinationOptions           `json:"mysqlOptions,omitempty"`
 	MongoOptions           *MongoDestinationOptions           `json:"mongoOptions,omitempty"`
 	GcpCloudStorageOptions *GcpCloudStorageDestinationOptions `json:"gcpCloudStorageOptions,omitempty"`
+	DynamoDBOptions        *DynamoDBDestinationOptions        `json:"dynamoDBOptions,omitempty"`
+}
+
+type DynamoDBDestinationOptions struct {
+	TableMappings []*DynamoDBDestinationTableMapping `json:"tableMappings"`
+}
+
+func (d *DynamoDBDestinationOptions) ToDto() *mgmtv1alpha1.DynamoDBDestinationConnectionOptions {
+	tableMappings := make([]*mgmtv1alpha1.DynamoDBDestinationTableMapping, 0, len(d.TableMappings))
+	for _, tm := range d.TableMappings {
+		tableMappings = append(tableMappings, tm.ToDto())
+	}
+	return &mgmtv1alpha1.DynamoDBDestinationConnectionOptions{
+		TableMappings: tableMappings,
+	}
+}
+func (d *DynamoDBDestinationOptions) FromDto(dto *mgmtv1alpha1.DynamoDBDestinationConnectionOptions) {
+	d.TableMappings = make([]*DynamoDBDestinationTableMapping, 0, len(dto.GetTableMappings()))
+
+	for _, dtotm := range dto.GetTableMappings() {
+		tm := &DynamoDBDestinationTableMapping{}
+		tm.FromDto(dtotm)
+		d.TableMappings = append(d.TableMappings, tm)
+	}
+}
+
+type DynamoDBDestinationTableMapping struct {
+	SourceTable      string `json:"sourceTable"`
+	DestinationTable string `json:"destinationTable"`
+}
+
+func (d *DynamoDBDestinationTableMapping) ToDto() *mgmtv1alpha1.DynamoDBDestinationTableMapping {
+	return &mgmtv1alpha1.DynamoDBDestinationTableMapping{
+		SourceTable:      d.SourceTable,
+		DestinationTable: d.DestinationTable,
+	}
+}
+func (d *DynamoDBDestinationTableMapping) FromDto(dto *mgmtv1alpha1.DynamoDBDestinationTableMapping) {
+	d.SourceTable = dto.GetSourceTable()
+	d.DestinationTable = dto.GetDestinationTable()
 }
 
 type GcpCloudStorageDestinationOptions struct{}
@@ -1144,6 +1383,13 @@ func (j *JobDestinationOptions) ToDto() *mgmtv1alpha1.JobDestinationOptions {
 			},
 		}
 	}
+	if j.DynamoDBOptions != nil {
+		return &mgmtv1alpha1.JobDestinationOptions{
+			Config: &mgmtv1alpha1.JobDestinationOptions_DynamodbOptions{
+				DynamodbOptions: j.DynamoDBOptions.ToDto(),
+			},
+		}
+	}
 
 	return nil
 }
@@ -1183,6 +1429,9 @@ func (j *JobDestinationOptions) FromDto(dto *mgmtv1alpha1.JobDestinationOptions)
 		j.MongoOptions = &MongoDestinationOptions{}
 	case *mgmtv1alpha1.JobDestinationOptions_GcpCloudstorageOptions:
 		j.GcpCloudStorageOptions = &GcpCloudStorageDestinationOptions{}
+	case *mgmtv1alpha1.JobDestinationOptions_DynamodbOptions:
+		j.DynamoDBOptions = &DynamoDBDestinationOptions{}
+		j.DynamoDBOptions.FromDto(config.DynamodbOptions)
 	default:
 		return fmt.Errorf("invalid job destination options config")
 	}

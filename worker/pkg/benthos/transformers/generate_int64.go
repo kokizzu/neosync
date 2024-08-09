@@ -2,11 +2,13 @@ package transformers
 
 import (
 	"fmt"
-	"time"
 
-	"github.com/benthosdev/benthos/v4/public/bloblang"
 	transformer_utils "github.com/nucleuscloud/neosync/worker/pkg/benthos/transformers/utils"
+	"github.com/nucleuscloud/neosync/worker/pkg/rng"
+	"github.com/warpstreamlabs/bento/public/bloblang"
 )
+
+// +neosyncTransformerBuilder:generate:generateInt64
 
 /*
 Integers can either be either put into non-numeric data types (varchar, text, integer) or numeric data types
@@ -26,10 +28,11 @@ So we will need to understand what type of column the user is trying to insert t
 
 func init() {
 	spec := bloblang.NewPluginSpec().
-		Param(bloblang.NewBoolParam("randomize_sign")).
-		Param(bloblang.NewInt64Param("min")).
-		Param(bloblang.NewInt64Param("max")).
-		Param(bloblang.NewInt64Param("seed").Default(time.Now().UnixNano()))
+		Description("Generates a random integer value with a default length of 4 unless the Integer Length or Preserve Length parameters are defined.").
+		Param(bloblang.NewBoolParam("randomize_sign").Default(false).Description("A boolean indicating whether the sign of the float should be randomized.")).
+		Param(bloblang.NewInt64Param("min").Description("Specifies the minimum value for the generated int.")).
+		Param(bloblang.NewInt64Param("max").Description("Specifies the maximum value for the generated int.")).
+		Param(bloblang.NewInt64Param("seed").Optional().Description("An optional seed value used to generate deterministic outputs."))
 
 	err := bloblang.RegisterFunctionV2("generate_int64", spec, func(args *bloblang.ParsedParams) (bloblang.Function, error) {
 		randomizeSign, err := args.GetBool("randomize_sign")
@@ -47,8 +50,20 @@ func init() {
 			return nil, err
 		}
 
+		seedArg, err := args.GetOptionalInt64("seed")
+		if err != nil {
+			return nil, err
+		}
+
+		seed, err := transformer_utils.GetSeedOrDefault(seedArg)
+		if err != nil {
+			return nil, err
+		}
+
+		randomizer := rng.New(seed)
+
 		return func() (any, error) {
-			res, err := generateRandomInt64(randomizeSign, min, max)
+			res, err := generateRandomInt64(randomizer, randomizeSign, min, max)
 			if err != nil {
 				return nil, fmt.Errorf("unable to run generate_int64: %w", err)
 			}
@@ -61,15 +76,24 @@ func init() {
 	}
 }
 
+func (t *GenerateInt64) Generate(opts any) (any, error) {
+	parsedOpts, ok := opts.(*GenerateInt64Opts)
+	if !ok {
+		return nil, fmt.Errorf("invalid parsed opts: %T", opts)
+	}
+
+	return generateRandomInt64(parsedOpts.randomizer, parsedOpts.randomizeSign, parsedOpts.min, parsedOpts.max)
+}
+
 /*
 Generates a random int64 in the interval [min, max].
 */
-func generateRandomInt64(randomizeSign bool, minValue, maxValue int64) (int64, error) {
-	output, err := transformer_utils.GenerateRandomInt64InValueRange(minValue, maxValue)
+func generateRandomInt64(randomizer rng.Rand, randomizeSign bool, minValue, maxValue int64) (int64, error) {
+	output, err := transformer_utils.GenerateRandomInt64InValueRange(randomizer, minValue, maxValue)
 	if err != nil {
 		return 0, err
 	}
-	if randomizeSign && generateRandomBool() {
+	if randomizeSign && generateRandomBool(randomizer) {
 		output *= -1
 	}
 	return output, nil

@@ -4,7 +4,7 @@ import FormError from '@/components/FormError';
 import { PasswordInput } from '@/components/PasswordComponent';
 import Spinner from '@/components/Spinner';
 import RequiredLabel from '@/components/labels/RequiredLabel';
-import { setOnboardingConfig } from '@/components/onboarding-checklist/OnboardingChecklist';
+import { buildAccountOnboardingConfig } from '@/components/onboarding-checklist/OnboardingChecklist';
 import { useAccount } from '@/components/providers/account-provider';
 import SkeletonForm from '@/components/skeleton/SkeletonForm';
 import SwitchCard from '@/components/switches/SwitchCard';
@@ -20,33 +20,56 @@ import {
   FormMessage,
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
-import { toast } from '@/components/ui/use-toast';
-import { useGetAccountOnboardingConfig } from '@/libs/hooks/useGetAccountOnboardingConfig';
-import { getConnection } from '@/libs/hooks/useGetConnection';
-import { AWSFormValues, AWS_FORM_SCHEMA } from '@/yup-validations/connections';
+import { getErrorMessage } from '@/util/util';
+import {
+  AWSFormValues,
+  AWS_FORM_SCHEMA,
+  CreateConnectionFormContext,
+} from '@/yup-validations/connections';
+import {
+  createConnectQueryKey,
+  useMutation,
+  useQuery,
+} from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import {
-  AwsS3ConnectionConfig,
-  AwsS3Credentials,
-  ConnectionConfig,
-  CreateConnectionRequest,
-  CreateConnectionResponse,
   GetAccountOnboardingConfigResponse,
+  GetConnectionResponse,
 } from '@neosync/sdk';
+import {
+  createConnection,
+  getAccountOnboardingConfig,
+  getConnection,
+  isConnectionNameAvailable,
+  setAccountOnboardingConfig,
+} from '@neosync/sdk/connectquery';
+import { useQueryClient } from '@tanstack/react-query';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { IoAlertCircleOutline } from 'react-icons/io5';
+import { toast } from 'sonner';
+import { buildConnectionConfigAwsS3 } from '../../../connections/util';
 
 export default function AwsS3Form() {
   const searchParams = useSearchParams();
   const { account } = useAccount();
   const sourceConnId = searchParams.get('sourceId');
   const [isLoading, setIsLoading] = useState<boolean>();
-  const { data: onboardingData, mutate } = useGetAccountOnboardingConfig(
-    account?.id ?? ''
+
+  const { data: onboardingData } = useQuery(
+    getAccountOnboardingConfig,
+    { accountId: account?.id ?? '' },
+    { enabled: !!account?.id }
   );
-  const form = useForm<AWSFormValues>({
+  const queryclient = useQueryClient();
+  const { mutateAsync: setOnboardingConfigAsync } = useMutation(
+    setAccountOnboardingConfig
+  );
+  const { mutateAsync: isConnectionNameAvailableAsync } = useMutation(
+    isConnectionNameAvailable
+  );
+  const form = useForm<AWSFormValues, CreateConnectionFormContext>({
     resolver: yupResolver(AWS_FORM_SCHEMA),
     defaultValues: {
       connectionName: '',
@@ -54,20 +77,25 @@ export default function AwsS3Form() {
         bucket: '',
       },
     },
-    context: { accountId: account?.id ?? '' },
+    context: {
+      accountId: account?.id ?? '',
+      isConnectionNameAvailable: isConnectionNameAvailableAsync,
+    },
   });
   const router = useRouter();
+  const { mutateAsync: createAwsS3Connection } = useMutation(createConnection);
+  const { mutateAsync: getAwsS3Connection } = useMutation(getConnection);
 
   async function onSubmit(values: AWSFormValues) {
     if (!account) {
       return;
     }
     try {
-      const connection = await createAwsS3Connection(
-        values.s3,
-        values.connectionName,
-        account.id
-      );
+      const connection = await createAwsS3Connection({
+        name: values.connectionName,
+        accountId: account.id,
+        connectionConfig: buildConnectionConfigAwsS3(values),
+      });
 
       // updates the onboarding data
       if (
@@ -75,43 +103,53 @@ export default function AwsS3Form() {
         !onboardingData?.config.hasCreatedDestinationConnection
       ) {
         try {
-          const resp = await setOnboardingConfig(account.id, {
-            hasCreatedSourceConnection:
-              onboardingData.config.hasCreatedSourceConnection,
-            hasCreatedDestinationConnection: true,
-            hasCreatedJob: onboardingData.config.hasCreatedJob,
-            hasInvitedMembers: onboardingData.config.hasInvitedMembers,
+          const resp = await setOnboardingConfigAsync({
+            accountId: account.id,
+            config: buildAccountOnboardingConfig({
+              hasCreatedSourceConnection:
+                onboardingData.config.hasCreatedSourceConnection,
+              hasCreatedDestinationConnection: true,
+              hasCreatedJob: onboardingData.config.hasCreatedJob,
+              hasInvitedMembers: onboardingData.config.hasInvitedMembers,
+            }),
           });
-          mutate(
+          queryclient.setQueryData(
+            createConnectQueryKey(getAccountOnboardingConfig, {
+              accountId: account.id,
+            }),
             new GetAccountOnboardingConfigResponse({
               config: resp.config,
             })
           );
         } catch (e) {
-          toast({
-            title: 'Unable to update onboarding status!',
-            variant: 'destructive',
+          toast.error('Unable to update onboarding status!', {
+            description: getErrorMessage(e),
           });
         }
       } else {
         try {
-          const resp = await setOnboardingConfig(account.id, {
-            hasCreatedSourceConnection: true,
-            hasCreatedDestinationConnection:
-              onboardingData?.config?.hasCreatedSourceConnection ?? true,
-            hasCreatedJob: onboardingData?.config?.hasCreatedJob ?? true,
-            hasInvitedMembers:
-              onboardingData?.config?.hasInvitedMembers ?? true,
+          const resp = await setOnboardingConfigAsync({
+            accountId: account.id,
+            config: buildAccountOnboardingConfig({
+              hasCreatedSourceConnection: true,
+              hasCreatedDestinationConnection:
+                onboardingData?.config?.hasCreatedSourceConnection ?? true,
+              hasCreatedJob: onboardingData?.config?.hasCreatedJob ?? true,
+              hasInvitedMembers:
+                onboardingData?.config?.hasInvitedMembers ?? true,
+            }),
           });
-          mutate(
+          queryclient.setQueryData(
+            createConnectQueryKey(getAccountOnboardingConfig, {
+              accountId: account.id,
+            }),
             new GetAccountOnboardingConfigResponse({
               config: resp.config,
             })
           );
         } catch (e) {
-          toast({
-            title: 'Unable to update onboarding status!',
-            variant: 'destructive',
+          toast.error('Unable to update onboarding status!', {
+            description: getErrorMessage(e),
           });
         }
       }
@@ -120,6 +158,14 @@ export default function AwsS3Form() {
       if (returnTo) {
         router.push(returnTo);
       } else if (connection.connection?.id) {
+        queryclient.setQueryData(
+          createConnectQueryKey(getConnection, {
+            id: connection.connection.id,
+          }),
+          new GetConnectionResponse({
+            connection: connection.connection,
+          })
+        );
         router.push(
           `/${account?.name}/connections/${connection.connection.id}`
         );
@@ -138,7 +184,7 @@ the hook in the useEffect conditionally. This is used to retrieve the values for
       if (sourceConnId && account?.id) {
         setIsLoading(true);
         try {
-          const connData = await getConnection(account.id, sourceConnId);
+          const connData = await getAwsS3Connection({ id: sourceConnId });
 
           if (
             connData &&
@@ -172,9 +218,8 @@ the hook in the useEffect conditionally. This is used to retrieve the values for
         } catch (error) {
           console.error('Failed to fetch connection data:', error);
           setIsLoading(false);
-          toast({
-            title: 'Unable to clone connection!',
-            variant: 'destructive',
+          toast.error('Unable to clone connection!', {
+            description: getErrorMessage(error),
           });
         } finally {
           setIsLoading(false);
@@ -414,48 +459,4 @@ the hook in the useEffect conditionally. This is used to retrieve the values for
       </form>
     </Form>
   );
-}
-
-async function createAwsS3Connection(
-  s3: AWSFormValues['s3'],
-  name: string,
-  accountId: string
-): Promise<CreateConnectionResponse> {
-  const res = await fetch(`/api/accounts/${accountId}/connections`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(
-      new CreateConnectionRequest({
-        accountId,
-        name: name,
-        connectionConfig: new ConnectionConfig({
-          config: {
-            case: 'awsS3Config',
-            value: new AwsS3ConnectionConfig({
-              bucket: s3.bucket,
-              pathPrefix: s3.pathPrefix,
-              region: s3.region,
-              endpoint: s3.endpoint,
-              credentials: new AwsS3Credentials({
-                profile: s3.credentials?.profile,
-                accessKeyId: s3.credentials?.accessKeyId,
-                secretAccessKey: s3.credentials?.secretAccessKey,
-                fromEc2Role: s3.credentials?.fromEc2Role,
-                roleArn: s3.credentials?.roleArn,
-                roleExternalId: s3.credentials?.roleExternalId,
-                sessionToken: s3.credentials?.sessionToken,
-              }),
-            }),
-          },
-        }),
-      })
-    ),
-  });
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return CreateConnectionResponse.fromJson(await res.json());
 }

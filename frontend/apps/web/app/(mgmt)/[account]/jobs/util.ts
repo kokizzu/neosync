@@ -1,13 +1,19 @@
+import { ValidSubsetConnectionType } from '@/components/jobs/subsets/utils';
 import {
   convertMinutesToNanoseconds,
   convertNanosecondsToMinutes,
 } from '@/util/util';
 import {
-  DestinationFormValues,
+  DynamoDBSourceUnmappedTransformConfigFormValues,
+  JobMappingFormValues,
+  NewDestinationFormValues,
   SchemaFormValues,
+  SchemaFormValuesDestinationOptions,
+  VirtualForeignConstraintFormValues,
   convertJobMappingTransformerFormToJobMappingTransformer,
   convertJobMappingTransformerToForm,
 } from '@/yup-validations/jobs';
+import { Struct, Value } from '@bufbuild/protobuf';
 import {
   ActivityOptions,
   AiGenerateSourceOptions,
@@ -15,17 +21,21 @@ import {
   AiGenerateSourceTableOption,
   AwsS3DestinationConnectionOptions,
   Connection,
-  CreateJobDestinationConnectionsRequest,
-  CreateJobDestinationConnectionsResponse,
   CreateJobRequest,
-  CreateJobResponse,
   DatabaseTable,
+  DynamoDBDestinationConnectionOptions,
+  DynamoDBDestinationTableMapping,
+  DynamoDBSourceConnectionOptions,
+  DynamoDBSourceSchemaSubset,
+  DynamoDBSourceTableOption,
+  DynamoDBSourceUnmappedTransformConfig,
   GcpCloudStorageDestinationConnectionOptions,
+  GenerateBool,
   GenerateSourceOptions,
   GenerateSourceSchemaOption,
   GenerateSourceTableOption,
+  GenerateString,
   GetAiGeneratedDataRequest,
-  IsJobNameAvailableResponse,
   Job,
   JobDestination,
   JobDestinationOptions,
@@ -43,8 +53,7 @@ import {
   MysqlSourceSchemaSubset,
   MysqlSourceTableOption,
   MysqlTruncateTableConfig,
-  PauseJobRequest,
-  PauseJobResponse,
+  Passthrough,
   PostgresDestinationConnectionOptions,
   PostgresOnConflictConfig,
   PostgresSourceConnectionOptions,
@@ -53,20 +62,14 @@ import {
   PostgresSourceTableOption,
   PostgresTruncateTableConfig,
   RetryPolicy,
-  SetJobSourceSqlConnectionSubsetsRequest,
-  SetJobSourceSqlConnectionSubsetsResponse,
-  SetJobSyncOptionsRequest,
-  SetJobWorkflowOptionsRequest,
-  SetJobWorkflowOptionsResponse,
-  UpdateJobDestinationConnectionRequest,
-  UpdateJobDestinationConnectionResponse,
-  UpdateJobScheduleRequest,
-  UpdateJobScheduleResponse,
+  TransformerConfig,
+  TransformerSource,
+  ValidateJobMappingsRequest,
+  ValidateJobMappingsResponse,
   VirtualForeignConstraint,
   VirtualForeignKey,
   WorkflowOptions,
 } from '@neosync/sdk';
-import { SampleRecord } from '../new/job/aigenerate/single/schema/types';
 import {
   ActivityOptionsSchema,
   ConnectFormValues,
@@ -77,6 +80,8 @@ import {
   SingleTableAiConnectFormValues,
   SingleTableAiSchemaFormValues,
   SingleTableConnectFormValues,
+  SingleTableEditAiSourceFormValues,
+  SingleTableEditSourceFormValues,
   SingleTableSchemaFormValues,
   SubsetFormValues,
   WorkflowSettingsSchema,
@@ -84,35 +89,31 @@ import {
 
 type GetConnectionById = (id: string) => Connection | undefined;
 
-export async function createNewSingleTableAiGenerateJob(
+export function getCreateNewSingleTableAiGenerateJobRequest(
   values: CreateSingleTableAiGenerateJobFormValues,
   accountId: string,
   getConnectionById: GetConnectionById
-): Promise<CreateJobResponse> {
-  return createJob(
-    new CreateJobRequest({
-      accountId,
-      jobName: values.define.jobName,
-      cronSchedule: values.define.cronSchedule,
-      initiateJobRun: values.define.initiateJobRun,
-      mappings: [],
-      source: toSingleTableAiGenerateJobSource(values),
-      destinations: toSingleTableGenerateJobDestinations(
-        values,
-        getConnectionById
-      ),
-      workflowOptions: toWorkflowOptions(values.define.workflowSettings),
-      syncOptions: toSyncOptions(values),
-    }),
-    accountId
-  );
+): CreateJobRequest {
+  return new CreateJobRequest({
+    accountId,
+    jobName: values.define.jobName,
+    cronSchedule: values.define.cronSchedule,
+    initiateJobRun: values.define.initiateJobRun,
+    mappings: [],
+    source: toSingleTableAiGenerateJobSource(values),
+    destinations: toSingleTableGenerateJobDestinations(
+      values,
+      getConnectionById
+    ),
+    workflowOptions: toWorkflowOptions(values.define.workflowSettings),
+    syncOptions: toSyncOptions(values),
+  });
 }
 
-export async function sampleAiGeneratedRecords(
-  values: Pick<CreateSingleTableAiGenerateJobFormValues, 'connect' | 'schema'>,
-  accountId: string
-): Promise<SampleRecord[]> {
-  const body = new GetAiGeneratedDataRequest({
+export function getSampleAiGeneratedRecordsRequest(
+  values: Pick<CreateSingleTableAiGenerateJobFormValues, 'connect' | 'schema'>
+): GetAiGeneratedDataRequest {
+  return new GetAiGeneratedDataRequest({
     aiConnectionId: values.connect.sourceId,
     count: BigInt(10),
     modelName: values.schema.model,
@@ -123,46 +124,65 @@ export async function sampleAiGeneratedRecords(
       table: values.schema.table,
     }),
   });
-
-  const res = await fetch(
-    `/api/accounts/${accountId}/connections/${values.connect.sourceId}/generate`,
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return (await res.json())?.records ?? [];
+}
+export function getSampleEditAiGeneratedRecordsRequest(
+  values: SingleTableEditAiSourceFormValues
+): GetAiGeneratedDataRequest {
+  return new GetAiGeneratedDataRequest({
+    aiConnectionId: values.source.sourceId,
+    count: BigInt(10),
+    modelName: values.schema.model,
+    userPrompt: values.schema.userPrompt,
+    dataConnectionId: values.source.fkSourceConnectionId,
+    table: new DatabaseTable({
+      schema: values.schema.schema,
+      table: values.schema.table,
+    }),
+  });
 }
 
-export async function createNewSingleTableGenerateJob(
+export function getCreateNewSingleTableGenerateJobRequest(
   values: CreateSingleTableGenerateJobFormValues,
   accountId: string,
   getConnectionById: GetConnectionById
-): Promise<CreateJobResponse> {
-  return createJob(
-    new CreateJobRequest({
-      accountId,
-      jobName: values.define.jobName,
-      cronSchedule: values.define.cronSchedule,
-      initiateJobRun: values.define.initiateJobRun,
-      mappings: toSingleGenerateJobMappings(values),
-      source: toSingleTableGenerateJobSource(values),
-      destinations: toSingleTableGenerateJobDestinations(
-        values,
-        getConnectionById
-      ),
-      workflowOptions: toWorkflowOptions(values.define.workflowSettings),
-      syncOptions: toSyncOptions(values),
-    }),
-    accountId
+): CreateJobRequest {
+  return new CreateJobRequest({
+    accountId,
+    jobName: values.define.jobName,
+    cronSchedule: values.define.cronSchedule,
+    initiateJobRun: values.define.initiateJobRun,
+    mappings: toSingleGenerateJobMappings(values),
+    source: toSingleTableGenerateJobSource(values),
+    destinations: toSingleTableGenerateJobDestinations(
+      values,
+      getConnectionById
+    ),
+    workflowOptions: toWorkflowOptions(values.define.workflowSettings),
+    syncOptions: toSyncOptions(values),
+  });
+}
+
+export function fromStructToRecord(struct: Struct): Record<string, unknown> {
+  return Object.entries(struct.fields).reduce(
+    (output, [key, value]) => {
+      output[key] = handleValue(value);
+      return output;
+    },
+    {} as Record<string, unknown>
   );
+}
+
+function handleValue(value: Value): unknown {
+  switch (value.kind.case) {
+    case 'structValue': {
+      return fromStructToRecord(value.kind.value);
+    }
+    case 'listValue': {
+      return value.kind.value.values.map((val) => handleValue(val));
+    }
+    default:
+      return value.kind.value;
+  }
 }
 
 function toSingleTableAiGenerateJobSource(
@@ -177,6 +197,36 @@ function toSingleTableAiGenerateJobSource(
           modelName: values.schema.model,
           fkSourceConnectionId: values.connect.fkSourceConnectionId,
           userPrompt: values.schema.userPrompt,
+          generateBatchSize: BigInt(values.schema.generateBatchSize),
+          schemas: [
+            new AiGenerateSourceSchemaOption({
+              schema: values.schema.schema,
+              tables: [
+                new AiGenerateSourceTableOption({
+                  table: values.schema.table,
+                  rowCount: BigInt(values.schema.numRows),
+                }),
+              ],
+            }),
+          ],
+        }),
+      },
+    }),
+  });
+}
+export function toSingleTableEditAiGenerateJobSource(
+  values: SingleTableEditAiSourceFormValues
+): JobSource {
+  return new JobSource({
+    options: new JobSourceOptions({
+      config: {
+        case: 'aiGenerate',
+        value: new AiGenerateSourceOptions({
+          aiConnectionId: values.source.sourceId,
+          modelName: values.schema.model,
+          fkSourceConnectionId: values.source.fkSourceConnectionId,
+          userPrompt: values.schema.userPrompt,
+          generateBatchSize: BigInt(values.schema.generateBatchSize),
           schemas: [
             new AiGenerateSourceSchemaOption({
               schema: values.schema.schema,
@@ -228,29 +278,81 @@ function toSingleTableGenerateJobSource(
   });
 }
 
-export async function createNewSyncJob(
+export function toSingleTableEditGenerateJobSource(
+  values: SingleTableEditSourceFormValues
+): JobSource {
+  const schema = values.mappings.length > 0 ? values.mappings[0].schema : null;
+  const table = values.mappings.length > 0 ? values.mappings[0].table : null;
+  return new JobSource({
+    options: new JobSourceOptions({
+      config: {
+        case: 'generate',
+        value: new GenerateSourceOptions({
+          fkSourceConnectionId: values.source.fkSourceConnectionId,
+          schemas:
+            schema && table
+              ? [
+                  new GenerateSourceSchemaOption({
+                    schema: schema,
+                    tables: [
+                      new GenerateSourceTableOption({
+                        table: table,
+                        rowCount: BigInt(values.numRows),
+                      }),
+                    ],
+                  }),
+                ]
+              : [],
+        }),
+      },
+    }),
+  });
+}
+
+export function getCreateNewSyncJobRequest(
   values: CreateJobFormValues,
   accountId: string,
   getConnectionById: GetConnectionById
-): Promise<CreateJobResponse> {
-  return createJob(
-    new CreateJobRequest({
-      accountId,
-      jobName: values.define.jobName,
-      cronSchedule: values.define.cronSchedule,
-      initiateJobRun: values.define.initiateJobRun,
-      mappings: toSyncJobMappings(values),
-      virtualForeignKeys: toSyncVirtualForeignKeys(values),
-      source: toJobSource(values, getConnectionById),
-      destinations: toSyncJobDestinations(values, getConnectionById),
-      workflowOptions: toWorkflowOptions(values.define.workflowSettings),
-      syncOptions: toSyncOptions(values),
-    }),
-    accountId
+): CreateJobRequest {
+  const dstOptRecord = values.schema.destinationOptions.reduce(
+    (record, dstOpt) => {
+      record[dstOpt.destinationId] = dstOpt;
+      return record;
+    },
+    {} as Record<string, SchemaFormValuesDestinationOptions>
   );
+  return new CreateJobRequest({
+    accountId,
+    jobName: values.define.jobName,
+    cronSchedule: values.define.cronSchedule,
+    initiateJobRun: values.define.initiateJobRun,
+    mappings: toSyncJobMappings(values),
+    virtualForeignKeys: toSyncVirtualForeignKeys(values),
+    source: toJobSource(values, getConnectionById),
+    destinations: toSyncJobDestinations(
+      {
+        connect: {
+          ...values.connect,
+          destinations: values.connect.destinations.map((d) => {
+            const opt = dstOptRecord[d.connectionId];
+            return {
+              ...d,
+              destinationOptions: {
+                ...d.destinationOptions,
+                ...opt,
+              },
+            };
+          }),
+        },
+      },
+      getConnectionById
+    ),
+    workflowOptions: toWorkflowOptions(values.define.workflowSettings),
+    syncOptions: toSyncOptions(values),
+  });
 }
 
-function toWorkflowOptions(
+export function toWorkflowOptions(
   values?: WorkflowSettingsSchema
 ): WorkflowOptions | undefined {
   if (values?.runTimeout) {
@@ -310,8 +412,8 @@ function toSyncJobDestinations(
   });
 }
 
-function toJobDestinationOptions(
-  values: DestinationFormValues,
+export function toJobDestinationOptions(
+  values: NewDestinationFormValues,
   connection?: Connection
 ): JobDestinationOptions {
   if (!connection) {
@@ -325,13 +427,18 @@ function toJobDestinationOptions(
           value: new PostgresDestinationConnectionOptions({
             truncateTable: new PostgresTruncateTableConfig({
               truncateBeforeInsert:
-                values.destinationOptions.truncateBeforeInsert ?? false,
-              cascade: values.destinationOptions.truncateCascade ?? false,
+                values.destinationOptions.postgres?.truncateBeforeInsert ??
+                false,
+              cascade:
+                values.destinationOptions.postgres?.truncateCascade ?? false,
             }),
             onConflict: new PostgresOnConflictConfig({
-              doNothing: values.destinationOptions.onConflictDoNothing ?? false,
+              doNothing:
+                values.destinationOptions.postgres?.onConflictDoNothing ??
+                false,
             }),
-            initTableSchema: values.destinationOptions.initTableSchema,
+            initTableSchema:
+              values.destinationOptions.postgres?.initTableSchema,
           }),
         },
       });
@@ -343,12 +450,13 @@ function toJobDestinationOptions(
           value: new MysqlDestinationConnectionOptions({
             truncateTable: new MysqlTruncateTableConfig({
               truncateBeforeInsert:
-                values.destinationOptions.truncateBeforeInsert ?? false,
+                values.destinationOptions.mysql?.truncateBeforeInsert ?? false,
             }),
             onConflict: new MysqlOnConflictConfig({
-              doNothing: values.destinationOptions.onConflictDoNothing ?? false,
+              doNothing:
+                values.destinationOptions.mysql?.onConflictDoNothing ?? false,
             }),
-            initTableSchema: values.destinationOptions.initTableSchema,
+            initTableSchema: values.destinationOptions.mysql?.initTableSchema,
           }),
         },
       });
@@ -374,6 +482,23 @@ function toJobDestinationOptions(
         config: {
           case: 'gcpCloudstorageOptions',
           value: new GcpCloudStorageDestinationConnectionOptions({}),
+        },
+      });
+    }
+    case 'dynamodbConfig': {
+      return new JobDestinationOptions({
+        config: {
+          case: 'dynamodbOptions',
+          value: new DynamoDBDestinationConnectionOptions({
+            tableMappings:
+              values.destinationOptions.dynamodb?.tableMappings.map(
+                (tm) =>
+                  new DynamoDBDestinationTableMapping({
+                    sourceTable: tm.sourceTable,
+                    destinationTable: tm.destinationTable,
+                  })
+              ),
+          }),
         },
       });
     }
@@ -457,7 +582,8 @@ function toJobSourceOptions(
           value: new PostgresSourceConnectionOptions({
             connectionId: values.connect.sourceId,
             haltOnNewColumnAddition:
-              values.connect.sourceOptions.haltOnNewColumnAddition,
+              values.connect.sourceOptions.postgres?.haltOnNewColumnAddition ??
+              false,
             subsetByForeignKeyConstraints:
               values.subset?.subsetOptions.subsetByForeignKeyConstraints,
             schemas:
@@ -473,7 +599,8 @@ function toJobSourceOptions(
           value: new MysqlSourceConnectionOptions({
             connectionId: values.connect.sourceId,
             haltOnNewColumnAddition:
-              values.connect.sourceOptions.haltOnNewColumnAddition,
+              values.connect.sourceOptions.mysql?.haltOnNewColumnAddition ??
+              false,
             subsetByForeignKeyConstraints:
               values.subset?.subsetOptions.subsetByForeignKeyConstraints,
             schemas:
@@ -491,9 +618,76 @@ function toJobSourceOptions(
           }),
         },
       });
+    case 'dynamodbConfig': {
+      return new JobSourceOptions({
+        config: {
+          case: 'dynamodb',
+          value: new DynamoDBSourceConnectionOptions({
+            connectionId: values.connect.sourceId,
+            tables: toDynamoDbSourceTableOptions(values.subset?.subsets ?? []),
+            unmappedTransforms: toDynamoDbSourceUnmappedOptions(
+              values.connect.sourceOptions.dynamodb?.unmappedTransformConfig ??
+                getDefaultUnmappedTransformConfig()
+            ),
+            enableConsistentRead:
+              values.connect.sourceOptions.dynamodb?.enableConsistentRead ??
+              false,
+          }),
+        },
+      });
+    }
     default:
       throw new Error('unsupported connection type');
   }
+}
+
+export function getDefaultUnmappedTransformConfig(): DynamoDBSourceUnmappedTransformConfigFormValues {
+  return {
+    boolean: convertJobMappingTransformerToForm(
+      new JobMappingTransformer({
+        source: TransformerSource.GENERATE_BOOL,
+        config: new TransformerConfig({
+          config: {
+            case: 'generateBoolConfig',
+            value: new GenerateBool(),
+          },
+        }),
+      })
+    ),
+    byte: convertJobMappingTransformerToForm(
+      new JobMappingTransformer({
+        source: TransformerSource.PASSTHROUGH,
+        config: new TransformerConfig({
+          config: {
+            case: 'passthroughConfig',
+            value: new Passthrough(),
+          },
+        }),
+      })
+    ),
+    n: convertJobMappingTransformerToForm(
+      new JobMappingTransformer({
+        source: TransformerSource.PASSTHROUGH,
+        config: new TransformerConfig({
+          config: {
+            case: 'passthroughConfig',
+            value: new Passthrough(),
+          },
+        }),
+      })
+    ),
+    s: convertJobMappingTransformerToForm(
+      new JobMappingTransformer({
+        source: TransformerSource.GENERATE_RANDOM_STRING,
+        config: new TransformerConfig({
+          config: {
+            case: 'generateStringConfig',
+            value: new GenerateString({ min: BigInt(1), max: BigInt(100) }),
+          },
+        }),
+      })
+    ),
+  };
 }
 
 function toPostgresSourceSchemaOptions(
@@ -544,325 +738,153 @@ function toMysqlSourceSchemaOptions(
   return Object.values(schemaMap);
 }
 
-async function createJob(
-  input: CreateJobRequest,
-  accountId: string
-): Promise<CreateJobResponse> {
-  const res = await fetch(`/api/accounts/${accountId}/jobs`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(input),
-  });
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return CreateJobResponse.fromJson(await res.json());
-}
-
-export async function removeJob(
-  accountId: string,
-  jobId: string
-): Promise<void> {
-  const res = await fetch(`/api/accounts/${accountId}/jobs/${jobId}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  await res.json();
-}
-
-export async function isJobNameAvailable(
-  name: string,
-  accountId: string
-): Promise<IsJobNameAvailableResponse> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/is-job-name-available?name=${name}`,
-    {
-      method: 'GET',
-      headers: {
-        'content-type': 'application/json',
-      },
-    }
+function toDynamoDbSourceTableOptions(
+  subsets: SubsetFormValues['subsets']
+): DynamoDBSourceTableOption[] {
+  return subsets.map(
+    (ss) =>
+      new DynamoDBSourceTableOption({
+        table: ss.table,
+        whereClause: ss.whereClause,
+      })
   );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return IsJobNameAvailableResponse.fromJson(await res.json());
 }
 
-export async function triggerJobRun(
-  accountId: string,
-  jobId: string
-): Promise<void> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/${jobId}/create-run`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ jobId }),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  await res.json();
+function toDynamoDbSourceUnmappedOptions(
+  unmappedTransformConfig: DynamoDBSourceUnmappedTransformConfigFormValues
+): DynamoDBSourceUnmappedTransformConfig {
+  return new DynamoDBSourceUnmappedTransformConfig({
+    b: convertJobMappingTransformerFormToJobMappingTransformer(
+      unmappedTransformConfig.byte
+    ),
+    boolean: convertJobMappingTransformerFormToJobMappingTransformer(
+      unmappedTransformConfig.boolean
+    ),
+    n: convertJobMappingTransformerFormToJobMappingTransformer(
+      unmappedTransformConfig.n
+    ),
+    s: convertJobMappingTransformerFormToJobMappingTransformer(
+      unmappedTransformConfig.s
+    ),
+  });
 }
 
-export async function createJobConnections(
-  jobId: string,
-  values: DestinationFormValues[],
-  connections: Connection[],
-  accountId: string
-): Promise<CreateJobDestinationConnectionsResponse> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/${jobId}/destination-connections`,
-    {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(
-        new CreateJobDestinationConnectionsRequest({
-          jobId: jobId,
-          destinations: values.map((d) => {
-            return new JobDestination({
-              connectionId: d.connectionId,
-              options: toJobDestinationOptions(
-                d,
-                connections.find((c) => c.id === d.connectionId)
-              ),
-            });
+export function toDynamoDbSourceUnmappedOptionsFormValues(
+  ut: DynamoDBSourceUnmappedTransformConfig | undefined
+): DynamoDBSourceUnmappedTransformConfigFormValues {
+  if (!ut) {
+    return getDefaultUnmappedTransformConfig();
+  }
+  return {
+    boolean: convertJobMappingTransformerToForm(
+      ut.boolean ||
+        new JobMappingTransformer({
+          source: TransformerSource.GENERATE_BOOL,
+          config: new TransformerConfig({
+            config: {
+              case: 'generateBoolConfig',
+              value: new GenerateBool(),
+            },
           }),
         })
-      ),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return CreateJobDestinationConnectionsResponse.fromJson(await res.json());
+    ),
+    byte: convertJobMappingTransformerToForm(
+      ut.b ||
+        new JobMappingTransformer({
+          source: TransformerSource.PASSTHROUGH,
+          config: new TransformerConfig({
+            config: {
+              case: 'passthroughConfig',
+              value: new Passthrough(),
+            },
+          }),
+        })
+    ),
+    n: convertJobMappingTransformerToForm(
+      ut.n ||
+        new JobMappingTransformer({
+          source: TransformerSource.PASSTHROUGH,
+          config: new TransformerConfig({
+            config: {
+              case: 'passthroughConfig',
+              value: new Passthrough(),
+            },
+          }),
+        })
+    ),
+    s: convertJobMappingTransformerToForm(
+      ut.s ||
+        new JobMappingTransformer({
+          source: TransformerSource.GENERATE_RANDOM_STRING,
+          config: new TransformerConfig({
+            config: {
+              case: 'generateStringConfig',
+              value: new GenerateString({ min: BigInt(1), max: BigInt(100) }),
+            },
+          }),
+        })
+    ),
+  };
 }
 
-export async function updateJobSyncActivityOptions(
-  accountId: string,
-  jobId: string,
+export function toActivityOptions(
   values: ActivityOptionsSchema
-): Promise<SetJobWorkflowOptionsResponse> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/${jobId}/syncoptions`,
-    {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(
-        new SetJobSyncOptionsRequest({
-          id: jobId,
-          syncOptions: new ActivityOptions({
-            startToCloseTimeout:
-              values.startToCloseTimeout !== undefined &&
-              values.startToCloseTimeout > 0
-                ? convertMinutesToNanoseconds(values.startToCloseTimeout)
-                : undefined,
-            scheduleToCloseTimeout:
-              values.scheduleToCloseTimeout !== undefined &&
-              values.scheduleToCloseTimeout > 0
-                ? convertMinutesToNanoseconds(values.scheduleToCloseTimeout)
-                : undefined,
-            retryPolicy: new RetryPolicy({
-              maximumAttempts: values.retryPolicy?.maximumAttempts,
-            }),
-          }),
-        })
-      ),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return SetJobWorkflowOptionsResponse.fromJson(await res.json());
-}
-
-export async function pauseJob(
-  accountId: string,
-  jobId: string,
-  isPaused: boolean
-): Promise<PauseJobResponse> {
-  const res = await fetch(`/api/accounts/${accountId}/jobs/${jobId}/pause`, {
-    method: 'PUT',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(
-      new PauseJobRequest({
-        id: jobId,
-        pause: isPaused,
-      })
-    ),
+): ActivityOptions {
+  return new ActivityOptions({
+    startToCloseTimeout:
+      values.startToCloseTimeout !== undefined && values.startToCloseTimeout > 0
+        ? convertMinutesToNanoseconds(values.startToCloseTimeout)
+        : undefined,
+    scheduleToCloseTimeout:
+      values.scheduleToCloseTimeout !== undefined &&
+      values.scheduleToCloseTimeout > 0
+        ? convertMinutesToNanoseconds(values.scheduleToCloseTimeout)
+        : undefined,
+    retryPolicy: new RetryPolicy({
+      maximumAttempts: values.retryPolicy?.maximumAttempts,
+    }),
   });
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return PauseJobResponse.fromJson(await res.json());
 }
 
-export async function updateJobSchedule(
-  accountId: string,
-  jobId: string,
-  cronSchedule?: string
-): Promise<UpdateJobScheduleResponse> {
-  const res = await fetch(`/api/accounts/${accountId}/jobs/${jobId}/schedule`, {
-    method: 'PUT',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify(
-      new UpdateJobScheduleRequest({
-        id: jobId,
-        cronSchedule: cronSchedule,
-      })
-    ),
-  });
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return UpdateJobScheduleResponse.fromJson(await res.json());
-}
-
-export async function updateJobWorkflowOptions(
-  accountId: string,
-  jobId: string,
-  values: WorkflowSettingsSchema
-): Promise<SetJobWorkflowOptionsResponse> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/${jobId}/workflowoptions`,
-    {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(
-        new SetJobWorkflowOptionsRequest({
-          id: jobId,
-          worfklowOptions: toWorkflowOptions(values),
-        })
-      ),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return SetJobWorkflowOptionsResponse.fromJson(await res.json());
-}
-
-export async function deleteJobConnection(
-  accountId: string,
-  jobId: string,
-  destinationId: string
-): Promise<void> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/${jobId}/destination-connection/${destinationId}`,
-    {
-      method: 'DELETE',
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  await res.json();
-}
-
-export async function setJobConnection(
-  accountId: string,
-  jobId: string,
-  values: DestinationFormValues,
-  destinationId: string,
-  connection?: Connection
-): Promise<UpdateJobDestinationConnectionResponse> {
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/${jobId}/destination-connection`,
-    {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(
-        new UpdateJobDestinationConnectionRequest({
-          jobId: jobId,
-          connectionId: values.connectionId,
-          destinationId: destinationId,
-          options: new JobDestinationOptions(
-            toJobDestinationOptions(values, connection)
-          ),
-        })
-      ),
-    }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
-  }
-  return UpdateJobDestinationConnectionResponse.fromJson(await res.json());
-}
-
-export async function setJobSubsets(
-  accountId: string,
-  jobId: string,
+export function toJobSourceSqlSubsetSchemas(
   values: SubsetFormValues,
-  dbType: string
-): Promise<SetJobSourceSqlConnectionSubsetsResponse> {
-  const schemas =
-    dbType == 'mysql'
-      ? new JobSourceSqlSubetSchemas({
-          schemas: {
-            case: 'mysqlSubset',
-            value: new MysqlSourceSchemaSubset({
-              mysqlSchemas: toMysqlSourceSchemaOptions(values.subsets),
-            }),
-          },
-        })
-      : new JobSourceSqlSubetSchemas({
-          schemas: {
-            case: 'postgresSubset',
-            value: new PostgresSourceSchemaSubset({
-              postgresSchemas: toPostgresSourceSchemaOptions(values.subsets),
-            }),
-          },
-        });
-  const res = await fetch(
-    `/api/accounts/${accountId}/jobs/${jobId}/source-connection/subsets`,
-    {
-      method: 'PUT',
-      headers: {
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(
-        new SetJobSourceSqlConnectionSubsetsRequest({
-          id: jobId,
-          subsetByForeignKeyConstraints:
-            values.subsetOptions.subsetByForeignKeyConstraints,
-          schemas,
-        })
-      ),
+  dbType: ValidSubsetConnectionType | null
+): JobSourceSqlSubetSchemas {
+  switch (dbType) {
+    case 'mysqlConfig': {
+      return new JobSourceSqlSubetSchemas({
+        schemas: {
+          case: 'mysqlSubset',
+          value: new MysqlSourceSchemaSubset({
+            mysqlSchemas: toMysqlSourceSchemaOptions(values.subsets),
+          }),
+        },
+      });
     }
-  );
-  if (!res.ok) {
-    const body = await res.json();
-    throw new Error(body.message);
+    case 'pgConfig': {
+      return new JobSourceSqlSubetSchemas({
+        schemas: {
+          case: 'postgresSubset',
+          value: new PostgresSourceSchemaSubset({
+            postgresSchemas: toPostgresSourceSchemaOptions(values.subsets),
+          }),
+        },
+      });
+    }
+    case 'dynamodbConfig': {
+      return new JobSourceSqlSubetSchemas({
+        schemas: {
+          case: 'dynamodbSubset',
+          value: new DynamoDBSourceSchemaSubset({
+            tables: toDynamoDbSourceTableOptions(values.subsets),
+          }),
+        },
+      });
+    }
+    default: {
+      return new JobSourceSqlSubetSchemas();
+    }
   }
-  return SetJobSourceSqlConnectionSubsetsResponse.fromJson(await res.json());
 }
 
 export function setDefaultNewJobFormValues(
@@ -963,12 +985,54 @@ function setDefaultConnectFormValues(
       storage.setItem(sessionKeys.dataSync.connect, JSON.stringify(values));
       return;
     }
+    case 'dynamodb': {
+      const defaultUnmappedConfig = getDefaultUnmappedTransformConfig();
+      const values: ConnectFormValues = {
+        sourceId: job.source.options.config.value.connectionId,
+        sourceOptions: {
+          dynamodb: {
+            unmappedTransformConfig: {
+              byte: job.source.options.config.value.unmappedTransforms?.b
+                ? convertJobMappingTransformerToForm(
+                    job.source.options.config.value.unmappedTransforms.b
+                  )
+                : defaultUnmappedConfig.byte,
+              boolean: job.source.options.config.value.unmappedTransforms
+                ?.boolean
+                ? convertJobMappingTransformerToForm(
+                    job.source.options.config.value.unmappedTransforms.boolean
+                  )
+                : defaultUnmappedConfig.boolean,
+              n: job.source.options.config.value.unmappedTransforms?.n
+                ? convertJobMappingTransformerToForm(
+                    job.source.options.config.value.unmappedTransforms.n
+                  )
+                : defaultUnmappedConfig.n,
+              s: job.source.options.config.value.unmappedTransforms?.s
+                ? convertJobMappingTransformerToForm(
+                    job.source.options.config.value.unmappedTransforms.s
+                  )
+                : defaultUnmappedConfig.s,
+            },
+            enableConsistentRead:
+              job.source.options.config.value.enableConsistentRead,
+          },
+        },
+        destinations: job.destinations.map((dest) =>
+          getDefaultDestinationFormValues(dest)
+        ),
+      };
+      storage.setItem(sessionKeys.dataSync.connect, JSON.stringify(values));
+      return;
+    }
     case 'mysql': {
       const values: ConnectFormValues = {
         sourceId: job.source.options.config.value.connectionId,
         sourceOptions: {
-          haltOnNewColumnAddition:
-            job.source.options.config.value.haltOnNewColumnAddition,
+          mysql: {
+            haltOnNewColumnAddition:
+              job.source.options.config.value.haltOnNewColumnAddition,
+          },
         },
         destinations: job.destinations.map((dest) =>
           getDefaultDestinationFormValues(dest)
@@ -982,8 +1046,10 @@ function setDefaultConnectFormValues(
       const values: ConnectFormValues = {
         sourceId: job.source.options.config.value.connectionId,
         sourceOptions: {
-          haltOnNewColumnAddition:
-            job.source.options.config.value.haltOnNewColumnAddition,
+          postgres: {
+            haltOnNewColumnAddition:
+              job.source.options.config.value.haltOnNewColumnAddition,
+          },
         },
         destinations: job.destinations.map((dest) =>
           getDefaultDestinationFormValues(dest)
@@ -1004,10 +1070,22 @@ function setDefaultSchemaFormValues(
   const sessionKeys = getNewJobSessionKeys(sessionPrefix);
   switch (job.source?.options?.config.case) {
     case 'aiGenerate': {
+      const numRows = getSingleTableAiGenerateNumRows(
+        job.source.options.config.value
+      );
+      let genBatchSize = 10;
+      if (job.source.options.config.value.generateBatchSize) {
+        genBatchSize = Number(
+          job.source.options.config.value.generateBatchSize
+        );
+      } else {
+        // batch size has not been set by the user. Set it to our default of 10, or num rows, whichever is lower
+        genBatchSize = Math.min(genBatchSize, numRows);
+      }
+
       const values: SingleTableAiSchemaFormValues = {
-        numRows: getSingleTableAiGenerateNumRows(
-          job.source.options.config.value
-        ),
+        numRows,
+        generateBatchSize: genBatchSize,
         userPrompt: job.source.options.config.value.userPrompt,
         model: job.source.options.config.value.modelName,
         ...getSingleTableAiSchemaTable(job.source.options.config.value),
@@ -1036,6 +1114,49 @@ function setDefaultSchemaFormValues(
     case 'mongodb':
     case 'postgres': {
       const values: SchemaFormValues = {
+        destinationOptions: [],
+        connectionId: job.source.options.config.value.connectionId,
+        mappings: job.mappings.map((mapping) => {
+          return {
+            ...mapping,
+            transformer: mapping.transformer
+              ? convertJobMappingTransformerToForm(mapping.transformer)
+              : convertJobMappingTransformerToForm(new JobMappingTransformer()),
+          };
+        }),
+        virtualForeignKeys: job.virtualForeignKeys.map((v) => {
+          return {
+            ...v,
+            foreignKey: {
+              schema: v.foreignKey?.schema ?? '',
+              table: v.foreignKey?.table ?? '',
+              columns: v.foreignKey?.columns ?? [],
+            },
+          };
+        }),
+      };
+
+      storage.setItem(sessionKeys.dataSync.schema, JSON.stringify(values));
+      return;
+    }
+    case 'dynamodb': {
+      const values: SchemaFormValues = {
+        destinationOptions: job.destinations.map((dest) => {
+          if (dest.options?.config.case !== 'dynamodbOptions') {
+            return { destinationId: dest.id };
+          }
+          return {
+            destinationId: dest.id,
+            dynamoDb: {
+              tableMappings: dest.options.config.value.tableMappings.map(
+                (tm) => ({
+                  sourceTable: tm.sourceTable,
+                  destinationTable: tm.destinationTable,
+                })
+              ),
+            },
+          };
+        }),
         connectionId: job.source.options.config.value.connectionId,
         mappings: job.mappings.map((mapping) => {
           return {
@@ -1142,29 +1263,51 @@ export function getSingleTableGenerateNumRows(
 
 export function getDefaultDestinationFormValues(
   d: JobDestination
-): DestinationFormValues {
+): NewDestinationFormValues {
   switch (d.options?.config.case) {
     case 'postgresOptions':
       return {
         connectionId: d.connectionId,
         destinationOptions: {
-          truncateBeforeInsert:
-            d.options.config.value.truncateTable?.truncateBeforeInsert,
-          truncateCascade: d.options.config.value.truncateTable?.cascade,
-          initTableSchema: d.options.config.value.initTableSchema,
-          onConflictDoNothing: d.options.config.value.onConflict?.doNothing,
+          postgres: {
+            truncateBeforeInsert:
+              d.options.config.value.truncateTable?.truncateBeforeInsert ??
+              false,
+            truncateCascade:
+              d.options.config.value.truncateTable?.cascade ?? false,
+            initTableSchema: d.options.config.value.initTableSchema ?? false,
+            onConflictDoNothing:
+              d.options.config.value.onConflict?.doNothing ?? false,
+          },
         },
       };
     case 'mysqlOptions':
       return {
         connectionId: d.connectionId,
         destinationOptions: {
-          truncateBeforeInsert:
-            d.options.config.value.truncateTable?.truncateBeforeInsert,
-          initTableSchema: d.options.config.value.initTableSchema,
-          onConflictDoNothing: d.options.config.value.onConflict?.doNothing,
+          mysql: {
+            truncateBeforeInsert:
+              d.options.config.value.truncateTable?.truncateBeforeInsert ??
+              false,
+            initTableSchema: d.options.config.value.initTableSchema ?? false,
+            onConflictDoNothing:
+              d.options.config.value.onConflict?.doNothing ?? false,
+          },
         },
       };
+    case 'dynamodbOptions': {
+      return {
+        connectionId: d.connectionId,
+        destinationOptions: {
+          dynamodb: {
+            tableMappings: d.options.config.value.tableMappings.map((tm) => ({
+              sourceTable: tm.sourceTable,
+              destinationTable: tm.destinationTable,
+            })),
+          },
+        },
+      };
+    }
     default:
       return {
         connectionId: d.connectionId,
@@ -1214,4 +1357,54 @@ function collectStringLeafs(obj: any): string[] {
 export function clearNewJobSession(storage: Storage, sessionId: string): void {
   const keys = collectStringLeafs(getNewJobSessionKeys(sessionId));
   keys.forEach((key) => storage.removeItem(key));
+}
+
+export async function validateJobMapping(
+  connectionId: string,
+  formMappings: JobMappingFormValues[],
+  accountId: string,
+  virtualForeignKeys: VirtualForeignConstraintFormValues[],
+  validate: (
+    req: ValidateJobMappingsRequest
+  ) => Promise<ValidateJobMappingsResponse>
+): Promise<ValidateJobMappingsResponse> {
+  const body = new ValidateJobMappingsRequest({
+    accountId,
+    mappings: formMappings.map((m) => {
+      return new JobMapping({
+        schema: m.schema,
+        table: m.table,
+        column: m.column,
+        transformer:
+          m.transformer.source != 0
+            ? convertJobMappingTransformerFormToJobMappingTransformer(
+                m.transformer
+              )
+            : new JobMappingTransformer({
+                source: 1,
+                config: new TransformerConfig({
+                  config: {
+                    case: 'passthroughConfig',
+                    value: {},
+                  },
+                }),
+              }),
+      });
+    }),
+    virtualForeignKeys: virtualForeignKeys.map((v) => {
+      return new VirtualForeignConstraint({
+        schema: v.schema,
+        table: v.table,
+        columns: v.columns,
+        foreignKey: new VirtualForeignKey({
+          schema: v.foreignKey.schema,
+          table: v.foreignKey.table,
+          columns: v.foreignKey.columns,
+        }),
+      });
+    }),
+    connectionId: connectionId,
+  });
+
+  return validate(body);
 }

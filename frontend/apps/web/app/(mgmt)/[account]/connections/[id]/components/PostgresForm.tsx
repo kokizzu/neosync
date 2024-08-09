@@ -36,18 +36,25 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import {
   POSTGRES_FORM_SCHEMA,
+  PostgresEditConnectionFormContext,
   PostgresFormValues,
   SSL_MODES,
 } from '@/yup-validations/connections';
+import { useMutation } from '@connectrpc/connect-query';
 import { yupResolver } from '@hookform/resolvers/yup';
 import {
   CheckConnectionConfigResponse,
   UpdateConnectionResponse,
 } from '@neosync/sdk';
+import {
+  checkConnectionConfig,
+  isConnectionNameAvailable,
+  updateConnection,
+} from '@neosync/sdk/connectquery';
 import { ExclamationTriangleIcon } from '@radix-ui/react-icons';
 import { ReactElement, useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
-import { checkPostgresConnection, updatePostgresConnection } from '../../util';
+import { buildConnectionConfigPostgres } from '../../util';
 
 interface Props {
   connectionId: string;
@@ -60,18 +67,23 @@ export default function PostgresForm(props: Props): ReactElement {
   const { connectionId, defaultValues, onSaved, onSaveFailed } = props;
   const { account } = useAccount();
   // used to know which tab - host or url that the user is on when we submit the form
-  const [activeTab, setActiveTab] = useState<string>(
+  const [activeTab, setActiveTab] = useState<'host' | 'url'>(
     defaultValues.url ? 'url' : 'host'
   );
+  const { mutateAsync: isConnectionNameAvailableAsync } = useMutation(
+    isConnectionNameAvailable
+  );
 
-  const form = useForm<PostgresFormValues>({
+  const form = useForm<PostgresFormValues, PostgresEditConnectionFormContext>({
+    mode: 'onChange',
     resolver: yupResolver(POSTGRES_FORM_SCHEMA),
     values: defaultValues,
     context: {
       originalConnectionName: defaultValues.connectionName,
       accountId: account?.id ?? '',
       activeTab: activeTab,
-    }, // used when validating a new connection name
+      isConnectionNameAvailable: isConnectionNameAvailableAsync,
+    },
   });
   const [validationResponse, setValidationResponse] = useState<
     CheckConnectionConfigResponse | undefined
@@ -80,18 +92,23 @@ export default function PostgresForm(props: Props): ReactElement {
   const [isValidating, setIsValidating] = useState<boolean>(false);
   const [openPermissionDialog, setOpenPermissionDialog] =
     useState<boolean>(false);
+  const { mutateAsync: updatePostgresConnection } =
+    useMutation(updateConnection);
+  const { mutateAsync: checkPostgresConnection } = useMutation(
+    checkConnectionConfig
+  );
 
   async function onSubmit(values: PostgresFormValues) {
     try {
-      const connection = await updatePostgresConnection(
-        {
+      const connection = await updatePostgresConnection({
+        id: connectionId,
+        name: values.connectionName,
+        connectionConfig: buildConnectionConfigPostgres({
           ...values,
           url: activeTab === 'url' ? values.url : undefined,
           db: values.db,
-        },
-        account?.id ?? '',
-        connectionId
-      );
+        }),
+      });
       onSaved(connection);
     } catch (err) {
       console.error(err);
@@ -136,7 +153,7 @@ export default function PostgresForm(props: Props): ReactElement {
 
         <RadioGroup
           defaultValue="url"
-          onValueChange={(e) => setActiveTab(e)}
+          onValueChange={(e) => setActiveTab(e as 'host' | 'url')}
           value={activeTab}
         >
           <div className="flex flex-col md:flex-row gap-4">
@@ -546,14 +563,13 @@ export default function PostgresForm(props: Props): ReactElement {
               setIsValidating(true);
               try {
                 const values = form.getValues();
-                const res = await checkPostgresConnection(
-                  {
+                const res = await checkPostgresConnection({
+                  connectionConfig: buildConnectionConfigPostgres({
                     ...values,
                     url: activeTab === 'url' ? values.url : undefined,
                     db: values.db,
-                  },
-                  account?.id ?? ''
-                );
+                  }),
+                });
                 setValidationResponse(res);
                 setOpenPermissionDialog(!!res?.isConnected);
               } catch (err) {

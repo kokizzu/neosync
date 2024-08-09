@@ -15,6 +15,12 @@ fullnameOverride:
 # -- Define a list of image pull secrets that will be used by the deployment
 imagePullSecrets: []
 
+# -- Provide a map of deployment annotations that will be attached to the deployment's annotations
+deploymentAnnotations: {}
+
+# -- Provide a map of pod annotations that will be attached to the deployment's pod template annotations
+podAnnotations: {}
+
 # serviceAccount Specify service account options for the deployment
 serviceAccount:
   # -- Specifies whether a service account should be created
@@ -42,7 +48,7 @@ resources:
     cpu: "100m"
     # -- Sets the Memory amount to be requested
     memory: "128Mi"
-  ## Sets teh max CPU and Memory. These are low-usage defaults. Change these depending on your needs.
+  ## Sets the max CPU and Memory. These are low-usage defaults. Change these depending on your needs.
   limits:
     # -- Sets the max CPU amount
     cpu: "500m"
@@ -142,3 +148,6 @@ updateStrategy:
 
 # -- Provide extra environment variables that will be applied to the deployment.
 extraEnvVars: []
+
+# -- Provide sidecars that will be appended directly to the deployment next to the user-container
+sidecarContainers: []

@@ -60,6 +60,31 @@ type Inputs struct {
 	OpenAiGenerate *OpenAiGenerate    `json:"openai_generate,omitempty" yaml:"openai_generate,omitempty"`
 	MongoDB        *InputMongoDb      `json:"mongodb,omitempty" yaml:"mongodb,omitempty"`
 	PooledMongoDB  *InputMongoDb      `json:"pooled_mongodb,omitempty" yaml:"pooled_mongodb,omitempty"`
+	AwsDynamoDB    *InputAwsDynamoDB  `json:"aws_dynamodb,omitempty" yaml:"aws_dynamodb,omitempty"`
+}
+
+type InputAwsDynamoDB struct {
+	Table          string  `json:"table" yaml:"table"`
+	Where          *string `json:"where,omitempty" yaml:"where,omitempty"`
+	ConsistentRead bool    `json:"consistent_read" yaml:"consistent_read"`
+
+	Region   string `json:"region,omitempty" yaml:"region,omitempty"`
+	Endpoint string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+
+	Credentials *AwsCredentials `json:"credentials,omitempty" yaml:"credentials,omitempty"`
+}
+
+type OutputAwsDynamoDB struct {
+	Table          string            `json:"table" yaml:"table"`
+	JsonMapColumns map[string]string `json:"json_map_columns,omitempty" yaml:"json_map_columns,omitempty"`
+
+	Region   string `json:"region,omitempty" yaml:"region,omitempty"`
+	Endpoint string `json:"endpoint,omitempty" yaml:"endpoint,omitempty"`
+
+	Credentials *AwsCredentials `json:"credentials,omitempty" yaml:"credentials,omitempty"`
+
+	MaxInFlight *int      `json:"max_in_flight,omitempty" yaml:"max_in_flight,omitempty"`
+	Batching    *Batching `json:"batching,omitempty" yaml:"batching,omitempty"`
 }
 
 type InputMongoDb struct {
@@ -143,15 +168,26 @@ type PipelineConfig struct {
 }
 
 type ProcessorConfig struct {
-	Mutation   *string               `json:"mutation,omitempty" yaml:"mutation,omitempty"`
-	Javascript *JavascriptConfig     `json:"javascript,omitempty" yaml:"javascript,omitempty"`
-	Branch     *BranchConfig         `json:"branch,omitempty" yaml:"branch,omitempty"`
-	Cache      *CacheConfig          `json:"cache,omitempty" yaml:"cache,omitempty"`
-	Mapping    *string               `json:"mapping,omitempty" yaml:"mapping,omitempty"`
-	Redis      *RedisProcessorConfig `json:"redis,omitempty" yaml:"redis,omitempty"`
-	Error      *ErrorProcessorConfig `json:"error,omitempty" yaml:"error,omitempty"`
-	Catch      []*ProcessorConfig    `json:"catch,omitempty" yaml:"catch,omitempty"`
-	While      *WhileProcessorConfig `json:"while,omitempty" yaml:"while,omitempty"`
+	Mutation                  *string                          `json:"mutation,omitempty" yaml:"mutation,omitempty"`
+	Javascript                *JavascriptConfig                `json:"javascript,omitempty" yaml:"javascript,omitempty"`
+	NeosyncJavascript         *NeosyncJavascriptConfig         `json:"neosync_javascript,omitempty" yaml:"neosync_javascript,omitempty"`
+	Branch                    *BranchConfig                    `json:"branch,omitempty" yaml:"branch,omitempty"`
+	Cache                     *CacheConfig                     `json:"cache,omitempty" yaml:"cache,omitempty"`
+	Mapping                   *string                          `json:"mapping,omitempty" yaml:"mapping,omitempty"`
+	Redis                     *RedisProcessorConfig            `json:"redis,omitempty" yaml:"redis,omitempty"`
+	Error                     *ErrorProcessorConfig            `json:"error,omitempty" yaml:"error,omitempty"`
+	Catch                     []*ProcessorConfig               `json:"catch,omitempty" yaml:"catch,omitempty"`
+	While                     *WhileProcessorConfig            `json:"while,omitempty" yaml:"while,omitempty"`
+	NeosyncDefaultTransformer *NeosyncDefaultTransformerConfig `json:"neosync_default_transformer,omitempty" yaml:"neosync_default_transformer,omitempty"`
+}
+
+type NeosyncDefaultTransformerConfig struct {
+	JobSourceOptionsString string   `json:"job_source_options_string" yaml:"job_source_options_string"`
+	MappedKeys             []string `json:"mapped_keys" yaml:"mapped_keys"`
+}
+
+type NeosyncJavascriptConfig struct {
+	Code string `json:"code" yaml:"code"`
 }
 
 type WhileProcessorConfig struct {
@@ -204,7 +240,6 @@ type OutputConfig struct {
 	Label      string `json:"label" yaml:"label"`
 	Outputs    `json:",inline" yaml:",inline"`
 	Processors []ProcessorConfig `json:"processors,omitempty" yaml:"processors,omitempty"`
-	// Broker  *OutputBrokerConfig `json:"broker,omitempty" yaml:"broker,omitempty"`
 }
 
 type Outputs struct {
@@ -226,6 +261,7 @@ type Outputs struct {
 	Switch          *SwitchOutputConfig    `json:"switch,omitempty" yaml:"switch,omitempty"`
 	MongoDB         *OutputMongoDb         `json:"mongodb,omitempty" yaml:"mongodb,omitempty"`
 	PooledMongoDB   *OutputMongoDb         `json:"pooled_mongodb,omitempty" yaml:"pooled_mongodb,omitempty"`
+	AwsDynamoDB     *OutputAwsDynamoDB     `json:"aws_dynamodb,omitempty" yaml:"aws_dynamodb,omitempty"`
 }
 
 type SwitchOutputConfig struct {
